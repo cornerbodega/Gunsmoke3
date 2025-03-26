@@ -1,5 +1,5 @@
 import { Canvas } from "@react-three/fiber";
-import { OrbitControls, Environment } from "@react-three/drei";
+import { OrbitControls, Environment, Cylinder } from "@react-three/drei";
 import { Suspense } from "react";
 import React, { forwardRef, useImperativeHandle } from "react";
 
@@ -210,6 +210,7 @@ export default function Home() {
   const sittingRef = useRef();
   const [ready, setReady] = useState(false);
   const judgeRef = useRef();
+  const witnessRef = useRef();
 
   useEffect(() => {
     const id = requestAnimationFrame(() => setReady(true));
@@ -296,14 +297,18 @@ export default function Home() {
               {/* Judge (not looking at anyone) */}
               <Character
                 ref={judgeRef}
-                position={[0, 1.75, -17]}
-                rotation={[0, 0, 0]}
-                params={{ sitting: true, colorTorso: "#222" }}
+                position={[0, 2, -18]}
+                rotation={[0, Math.PI, 0]}
+                params={{
+                  sitting: true,
+                  colorTorso: "#222",
+                  eyeTargetRef: witnessRef.current?.headRef, // 👈 NEW!
+                }}
               />
 
               {/* Plaintiff team */}
               <Character
-                position={[-6, 0, -4.5]}
+                position={[-6.5, -0.05, -3.5]}
                 rotation={[0, 0, 0]}
                 params={{
                   sitting: true,
@@ -312,7 +317,7 @@ export default function Home() {
                 }}
               />
               <Character
-                position={[-4, 0, -4.5]}
+                position={[-3.5, -0.05, -3.5]}
                 rotation={[0, 0, 0]}
                 params={{
                   sitting: true,
@@ -323,7 +328,7 @@ export default function Home() {
 
               {/* Defense team */}
               <Character
-                position={[4, 0, -4.5]}
+                position={[3.5, -0.05, -3.5]}
                 rotation={[0, 0, 0]}
                 params={{
                   sitting: true,
@@ -332,7 +337,7 @@ export default function Home() {
                 }}
               />
               <Character
-                position={[6, 0, -4.5]}
+                position={[6.5, -0.05, -3.5]}
                 rotation={[0, 0, 0]}
                 params={{
                   sitting: true,
@@ -345,8 +350,8 @@ export default function Home() {
               {[...Array(6)].map((_, i) => (
                 <Character
                   key={`jury-${i}`}
-                  position={[18, 0, -11 + i * 1.2]}
-                  rotation={[0, -Math.PI / 2, 0]}
+                  position={[18, 0, -13 + i * 1.3]}
+                  rotation={[0, Math.PI / 2, 0]}
                   params={{
                     sitting: true,
                     colorTorso: "#8b4513",
@@ -357,8 +362,8 @@ export default function Home() {
 
               {/* Stenographer */}
               <Character
-                position={[-16, 0, -8]}
-                rotation={[0, 0, 0]}
+                position={[-17.5, 0, -8]}
+                rotation={[0, -Math.PI / 2, 0]}
                 params={{
                   sitting: true,
                   colorTorso: "#9932cc",
@@ -366,23 +371,66 @@ export default function Home() {
                 }}
               />
 
-              {/* Audience (3 rows, 2 people per row – no middle aisle seat) */}
-              {[2, 10, 14].flatMap((z) =>
-                [-6, 6].map((x, i) => (
-                  <Character
-                    key={`audience-${x}-${z}`}
-                    position={[x, 0, z]}
-                    rotation={[0, 0, 0]}
-                    params={{
-                      sitting: true,
-                      colorTorso: ["#b22222", "#4682b4"][i % 2],
-                      eyeTargetRef: judgeRef.current?.headRef,
-                    }}
-                  />
-                ))
+              {/* Witness */}
+              <Character
+                ref={witnessRef}
+                position={[-10, 1.1, -15]}
+                rotation={[0, Math.PI, 0]} // facing the judge
+                params={{
+                  sitting: true,
+                  colorTorso: "#ffd700", // goldenrod/yellow for witness
+                  eyeTargetRef: judgeRef.current?.headRef,
+                }}
+              />
+
+              {/* Audience (4 people per row: 2 left, 2 right) */}
+              {[2, 6, 10, 14].flatMap((z) =>
+                [-12, -7.5, -3.5, 3.5, 7.5, 12].map((x, i) => {
+                  const skip = [
+                    [-7.5, 2],
+                    [7.5, 6],
+                    [-3.5, 10],
+                    [12, 14],
+                  ].some(([skipX, skipZ]) => skipX === x && skipZ === z);
+
+                  if (skip) return null;
+
+                  return (
+                    <Character
+                      key={`audience-${x}-${z}`}
+                      position={[x, 0, z]}
+                      rotation={[0, 0, 0]}
+                      params={{
+                        sitting: true,
+                        colorTorso: [
+                          "#b22222",
+                          "#4682b4",
+                          "#daa520",
+                          "#008b8b",
+                        ][i % 4],
+                        eyeTargetRef: judgeRef.current?.headRef,
+                      }}
+                    />
+                  );
+                })
               )}
             </>
           )}
+          {/* Bailiff */}
+          <group scale={[1.3, 1.3, 1.3]}>
+            <Character
+              position={[8, 0, -12]}
+              rotation={[0, 0, 0]}
+              params={{
+                sitting: false,
+                torsoLean: -0.1,
+                colorTorso: "#2f4f4f",
+                colorArms: "#2f4f4f",
+                colorLegs: "#00008b",
+                eyeTargetRef: judgeRef.current?.headRef,
+              }}
+            />
+          </group>
 
           {/* Ceiling Lights */}
           {[-10, 0, 10].flatMap((x) =>
@@ -391,7 +439,7 @@ export default function Home() {
               : [-10, 0, 10].map((z) => (
                   <CeilingLight
                     key={`ceiling-light-${x}-${z}`}
-                    position={[x, 8, z]}
+                    position={[x, 22, z]}
                   />
                 ))
           )}
@@ -617,24 +665,53 @@ const SidePaneledWall = ({
   );
 };
 
-const CeilingLight = ({ position = [0, 0, 0] }) => {
+const CeilingLight = ({ position = [0, 0, 0], chainLength = 12.5 }) => {
+  const linkCount = 10;
+  const linkSpacing = chainLength / linkCount;
+
+  const fixtureHeight = 0.1;
+  const bulbHeight = 0.5;
+
+  const fixtureY = -chainLength - fixtureHeight / 2;
+  const bulbY = fixtureY - bulbHeight / 2;
+
   return (
     <group position={position}>
-      {/* Light fixture base (plate on the ceiling) */}
-      <Box position={[0, 0, 0]} args={[0.8, 0.1, 0.8]} color="#333" />
+      {/* Chain */}
+      <group>
+        {Array.from({ length: linkCount }).map((_, i) => (
+          <Cylinder
+            key={i}
+            args={[0.05, 0.05, linkSpacing * 0.8, 8]}
+            position={[0, -i * linkSpacing - linkSpacing / 2, 0]}
+          >
+            <meshStandardMaterial attach="material" color="#666" />
+          </Cylinder>
+        ))}
+      </group>
 
-      {/* Light bulb or lamp shape */}
-      <Box position={[0, -0.25, 0]} args={[0.5, 0.5, 0.5]} color="orange" />
+      {/* Fixture base */}
+      <Box
+        position={[0, fixtureY, 0]}
+        args={[0.8, fixtureHeight, 0.8]}
+        color="#333"
+      />
 
-      {/* Emitting light */}
+      {/* Bulb */}
+      <Box
+        position={[0, bulbY, 0]}
+        args={[0.5, bulbHeight, 0.5]}
+        color="orange"
+      />
+
+      {/* Point Light centered inside bulb */}
       <pointLight
-        position={[0, 0, 0]}
+        position={[0, bulbY, 0]}
         intensity={50}
         distance={12}
         decay={2}
         color="orange"
         castShadow
-        visible
         shadow-mapSize-width={1024}
         shadow-mapSize-height={1024}
         shadow-bias={-0.005}
@@ -659,6 +736,32 @@ const Character = forwardRef(function Character(
 
     headRef.current.getWorldPosition(headWorldPos);
     params.eyeTargetRef.current.getWorldPosition(eyeTargetWorldPos);
+
+    // New: Rotate head toward target
+    const headParent = headRef.current.parent;
+    if (headParent) {
+      const targetPosLocal = new THREE.Vector3();
+      headParent.worldToLocal(targetPosLocal.copy(eyeTargetWorldPos));
+
+      // Calculate the yaw (horizontal turn) and pitch (up/down)
+      const dx = targetPosLocal.x;
+      const dy = targetPosLocal.y;
+      const dz = targetPosLocal.z;
+
+      const yaw = Math.atan2(dx, dz); // Y axis rotation
+      const pitch = Math.atan2(dy, Math.sqrt(dx * dx + dz * dz)); // X axis rotation
+
+      // Clamp to natural ranges (in radians)
+      const maxYaw = THREE.MathUtils.degToRad(25); // +/- 45 degrees
+      const maxPitch = THREE.MathUtils.degToRad(10); // +/- 20 degrees
+
+      headRef.current.rotation.y = THREE.MathUtils.clamp(yaw, -maxYaw, maxYaw);
+      headRef.current.rotation.x = THREE.MathUtils.clamp(
+        -pitch,
+        -maxPitch,
+        maxPitch
+      ); // negative for correct tilt
+    }
 
     // Direction vector from head to target
     const dir = new THREE.Vector3()
