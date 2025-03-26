@@ -211,6 +211,8 @@ export default function Home() {
   const [ready, setReady] = useState(false);
   const judgeRef = useRef();
   const witnessRef = useRef();
+  const [judgeHeadRef, setJudgeHeadRef] = useState(null);
+  const [witnessHeadRef, setWitnessHeadRef] = useState(null);
 
   useEffect(() => {
     const id = requestAnimationFrame(() => setReady(true));
@@ -294,15 +296,16 @@ export default function Home() {
           {/* Standing Character */}
           {ready && (
             <>
-              {/* Judge (not looking at anyone) */}
+              {/* Judge */}
               <Character
                 ref={judgeRef}
                 position={[0, 2, -18]}
                 rotation={[0, Math.PI, 0]}
+                onReady={setJudgeHeadRef}
                 params={{
                   sitting: true,
                   colorTorso: "#222",
-                  eyeTargetRef: witnessRef.current?.headRef, // 👈 NEW!
+                  eyeTargetRef: witnessHeadRef,
                 }}
               />
 
@@ -313,7 +316,7 @@ export default function Home() {
                 params={{
                   sitting: true,
                   colorTorso: "#1e90ff",
-                  eyeTargetRef: judgeRef.current?.headRef,
+                  eyeTargetRef: judgeHeadRef,
                 }}
               />
               <Character
@@ -322,7 +325,7 @@ export default function Home() {
                 params={{
                   sitting: true,
                   colorTorso: "#1e90ff",
-                  eyeTargetRef: judgeRef.current?.headRef,
+                  eyeTargetRef: judgeHeadRef,
                 }}
               />
 
@@ -333,7 +336,7 @@ export default function Home() {
                 params={{
                   sitting: true,
                   colorTorso: "#32cd32",
-                  eyeTargetRef: judgeRef.current?.headRef,
+                  eyeTargetRef: judgeHeadRef,
                 }}
               />
               <Character
@@ -342,11 +345,11 @@ export default function Home() {
                 params={{
                   sitting: true,
                   colorTorso: "#32cd32",
-                  eyeTargetRef: judgeRef.current?.headRef,
+                  eyeTargetRef: judgeHeadRef,
                 }}
               />
 
-              {/* Jury (facing across courtroom to witness/judge) */}
+              {/* Jury */}
               {[...Array(6)].map((_, i) => (
                 <Character
                   key={`jury-${i}`}
@@ -355,7 +358,7 @@ export default function Home() {
                   params={{
                     sitting: true,
                     colorTorso: "#8b4513",
-                    eyeTargetRef: judgeRef.current?.headRef,
+                    eyeTargetRef: judgeHeadRef,
                   }}
                 />
               ))}
@@ -367,7 +370,7 @@ export default function Home() {
                 params={{
                   sitting: true,
                   colorTorso: "#9932cc",
-                  eyeTargetRef: judgeRef.current?.headRef,
+                  eyeTargetRef: judgeHeadRef,
                 }}
               />
 
@@ -375,15 +378,16 @@ export default function Home() {
               <Character
                 ref={witnessRef}
                 position={[-10, 1.1, -15]}
-                rotation={[0, Math.PI, 0]} // facing the judge
+                rotation={[0, Math.PI, 0]}
+                onReady={setWitnessHeadRef}
                 params={{
                   sitting: true,
-                  colorTorso: "#ffd700", // goldenrod/yellow for witness
-                  eyeTargetRef: judgeRef.current?.headRef,
+                  colorTorso: "#ffd700",
+                  eyeTargetRef: judgeHeadRef,
                 }}
               />
 
-              {/* Audience (4 people per row: 2 left, 2 right) */}
+              {/* Audience */}
               {[2, 6, 10, 14].flatMap((z) =>
                 [-12, -7.5, -3.5, 3.5, 7.5, 12].map((x, i) => {
                   const skip = [
@@ -391,7 +395,7 @@ export default function Home() {
                     [7.5, 6],
                     [-3.5, 10],
                     [12, 14],
-                  ].some(([skipX, skipZ]) => skipX === x && skipZ === z);
+                  ].some(([sx, sz]) => sx === x && sz === z);
 
                   if (skip) return null;
 
@@ -408,7 +412,7 @@ export default function Home() {
                           "#daa520",
                           "#008b8b",
                         ][i % 4],
-                        eyeTargetRef: judgeRef.current?.headRef,
+                        eyeTargetRef: judgeHeadRef,
                       }}
                     />
                   );
@@ -416,6 +420,7 @@ export default function Home() {
               )}
             </>
           )}
+
           {/* Bailiff */}
           <group scale={[1.3, 1.3, 1.3]}>
             <Character
@@ -721,12 +726,23 @@ const CeilingLight = ({ position = [0, 0, 0], chainLength = 12.5 }) => {
 };
 
 const Character = forwardRef(function Character(
-  { position = [0, 0, 0], rotation = [0, 0, 0], params = {} },
+  { position = [0, 0, 0], rotation = [0, 0, 0], params = {}, onReady },
   ref
 ) {
   const headRef = useRef();
   const leftPupilRef = useRef();
   const rightPupilRef = useRef();
+
+  // 🔔 Notify parent when headRef is mounted
+  useEffect(() => {
+    if (headRef.current && typeof onReady === "function") {
+      onReady(headRef);
+    }
+  }, [headRef.current]);
+
+  useImperativeHandle(ref, () => ({
+    headRef,
+  }));
 
   useFrame(() => {
     if (!params.eyeTargetRef?.current || !headRef.current) return;
@@ -737,43 +753,37 @@ const Character = forwardRef(function Character(
     headRef.current.getWorldPosition(headWorldPos);
     params.eyeTargetRef.current.getWorldPosition(eyeTargetWorldPos);
 
-    // New: Rotate head toward target
     const headParent = headRef.current.parent;
     if (headParent) {
       const targetPosLocal = new THREE.Vector3();
       headParent.worldToLocal(targetPosLocal.copy(eyeTargetWorldPos));
 
-      // Calculate the yaw (horizontal turn) and pitch (up/down)
       const dx = targetPosLocal.x;
       const dy = targetPosLocal.y;
       const dz = targetPosLocal.z;
 
-      const yaw = Math.atan2(dx, dz); // Y axis rotation
-      const pitch = Math.atan2(dy, Math.sqrt(dx * dx + dz * dz)); // X axis rotation
+      const yaw = Math.atan2(dx, dz);
+      const pitch = Math.atan2(dy, Math.sqrt(dx * dx + dz * dz));
 
-      // Clamp to natural ranges (in radians)
-      const maxYaw = THREE.MathUtils.degToRad(25); // +/- 45 degrees
-      const maxPitch = THREE.MathUtils.degToRad(10); // +/- 20 degrees
+      const maxYaw = THREE.MathUtils.degToRad(25);
+      const maxPitch = THREE.MathUtils.degToRad(10);
 
       headRef.current.rotation.y = THREE.MathUtils.clamp(yaw, -maxYaw, maxYaw);
       headRef.current.rotation.x = THREE.MathUtils.clamp(
         -pitch,
         -maxPitch,
         maxPitch
-      ); // negative for correct tilt
+      );
     }
 
-    // Direction vector from head to target
     const dir = new THREE.Vector3()
       .subVectors(eyeTargetWorldPos, headWorldPos)
       .normalize();
 
-    // Convert to head's local space
     const localDir = headRef.current
       .worldToLocal(headWorldPos.clone().add(dir))
       .normalize();
 
-    // Clamp pupil movement
     const maxOffset = 0.03;
     const pupilX = THREE.MathUtils.clamp(
       localDir.x * 0.1,
@@ -800,10 +810,6 @@ const Character = forwardRef(function Character(
     colorArms = "#4444ff",
     colorHead = "#ffe0bd",
   } = params;
-
-  useImperativeHandle(ref, () => ({
-    headRef,
-  }));
 
   const legHeight = 0.75;
   const torsoHeight = 1.25;
@@ -867,7 +873,7 @@ const Character = forwardRef(function Character(
             args={[headSize, headSize, headSize]}
             color={colorHead}
           />
-          {/* Eyes (with pupils) */}
+          {/* Eyes */}
           <group position={[-eyeOffsetX, eyeOffsetY, eyeZ]}>
             <mesh>
               <circleGeometry args={[eyeSize, 16]} />
