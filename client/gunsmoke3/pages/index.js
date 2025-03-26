@@ -209,6 +209,7 @@ export default function Home() {
   const standingRef = useRef();
   const sittingRef = useRef();
   const [ready, setReady] = useState(false);
+  const judgeRef = useRef();
 
   useEffect(() => {
     const id = requestAnimationFrame(() => setReady(true));
@@ -292,22 +293,94 @@ export default function Home() {
           {/* Standing Character */}
           {ready && (
             <>
+              {/* Judge (not looking at anyone) */}
               <Character
-                ref={standingRef}
-                position={[0, 0, -10]}
-                params={{
-                  eyeTargetRef: sittingRef.current?.headRef || null,
-                }}
+                ref={judgeRef}
+                position={[0, 1.75, -17]}
+                rotation={[0, 0, 0]}
+                params={{ sitting: true, colorTorso: "#222" }}
               />
+
+              {/* Plaintiff team */}
               <Character
-                ref={sittingRef}
-                position={[-3.5, 0, -3.5]}
+                position={[-6, 0, -4.5]}
+                rotation={[0, 0, 0]}
                 params={{
                   sitting: true,
-                  torsoLean: 0,
-                  eyeTargetRef: standingRef.current?.headRef || null,
+                  colorTorso: "#1e90ff",
+                  eyeTargetRef: judgeRef.current?.headRef,
                 }}
               />
+              <Character
+                position={[-4, 0, -4.5]}
+                rotation={[0, 0, 0]}
+                params={{
+                  sitting: true,
+                  colorTorso: "#1e90ff",
+                  eyeTargetRef: judgeRef.current?.headRef,
+                }}
+              />
+
+              {/* Defense team */}
+              <Character
+                position={[4, 0, -4.5]}
+                rotation={[0, 0, 0]}
+                params={{
+                  sitting: true,
+                  colorTorso: "#32cd32",
+                  eyeTargetRef: judgeRef.current?.headRef,
+                }}
+              />
+              <Character
+                position={[6, 0, -4.5]}
+                rotation={[0, 0, 0]}
+                params={{
+                  sitting: true,
+                  colorTorso: "#32cd32",
+                  eyeTargetRef: judgeRef.current?.headRef,
+                }}
+              />
+
+              {/* Jury (facing across courtroom to witness/judge) */}
+              {[...Array(6)].map((_, i) => (
+                <Character
+                  key={`jury-${i}`}
+                  position={[18, 0, -11 + i * 1.2]}
+                  rotation={[0, -Math.PI / 2, 0]}
+                  params={{
+                    sitting: true,
+                    colorTorso: "#8b4513",
+                    eyeTargetRef: judgeRef.current?.headRef,
+                  }}
+                />
+              ))}
+
+              {/* Stenographer */}
+              <Character
+                position={[-16, 0, -8]}
+                rotation={[0, 0, 0]}
+                params={{
+                  sitting: true,
+                  colorTorso: "#9932cc",
+                  eyeTargetRef: judgeRef.current?.headRef,
+                }}
+              />
+
+              {/* Audience (3 rows, 2 people per row – no middle aisle seat) */}
+              {[2, 10, 14].flatMap((z) =>
+                [-6, 6].map((x, i) => (
+                  <Character
+                    key={`audience-${x}-${z}`}
+                    position={[x, 0, z]}
+                    rotation={[0, 0, 0]}
+                    params={{
+                      sitting: true,
+                      colorTorso: ["#b22222", "#4682b4"][i % 2],
+                      eyeTargetRef: judgeRef.current?.headRef,
+                    }}
+                  />
+                ))
+              )}
             </>
           )}
 
@@ -551,15 +624,15 @@ const CeilingLight = ({ position = [0, 0, 0] }) => {
       <Box position={[0, 0, 0]} args={[0.8, 0.1, 0.8]} color="#333" />
 
       {/* Light bulb or lamp shape */}
-      <Box position={[0, -0.25, 0]} args={[0.5, 0.5, 0.5]} color="yellow" />
+      <Box position={[0, -0.25, 0]} args={[0.5, 0.5, 0.5]} color="orange" />
 
       {/* Emitting light */}
       <pointLight
         position={[0, 0, 0]}
-        intensity={22}
+        intensity={50}
         distance={12}
         decay={2}
-        color="yellow"
+        color="orange"
         castShadow
         visible
         shadow-mapSize-width={1024}
