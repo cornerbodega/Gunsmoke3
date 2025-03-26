@@ -306,6 +306,7 @@ export default function Home() {
                   sitting: true,
                   colorTorso: "#222",
                   eyeTargetRef: witnessHeadRef,
+                  emotion: "angry", // or "happy", "sad", "surprised", "tired"
                 }}
               />
 
@@ -732,8 +733,9 @@ const Character = forwardRef(function Character(
   const headRef = useRef();
   const leftPupilRef = useRef();
   const rightPupilRef = useRef();
+  const leftEyelidRef = useRef();
+  const rightEyelidRef = useRef();
 
-  // 🔔 Notify parent when headRef is mounted
   useEffect(() => {
     if (headRef.current && typeof onReady === "function") {
       onReady(headRef);
@@ -743,7 +745,6 @@ const Character = forwardRef(function Character(
   useImperativeHandle(ref, () => ({
     headRef,
   }));
-
   useFrame(() => {
     if (!params.eyeTargetRef?.current || !headRef.current) return;
 
@@ -797,9 +798,61 @@ const Character = forwardRef(function Character(
     );
 
     if (leftPupilRef.current)
-      leftPupilRef.current.position.set(pupilX, pupilY, 0.02);
+      leftPupilRef.current.position.set(pupilX, pupilY, 0.0005);
     if (rightPupilRef.current)
-      rightPupilRef.current.position.set(pupilX, pupilY, 0.02);
+      rightPupilRef.current.position.set(pupilX, pupilY, 0.0005);
+
+    // === Eyelid Logic ===
+    const emotion = params.emotion || "neutral";
+    const baseLidY = 0.02;
+
+    const lidOffsets = {
+      neutral: 0.01,
+      angry: -0.02,
+      happy: 0.005,
+      sad: 0.07,
+      surprised: -0.01,
+      tired: 0.08,
+    };
+
+    const lidRotations = {
+      neutral: 0,
+      angry: -Math.PI / 10,
+      happy: 0,
+      sad: 0,
+      surprised: 0,
+      tired: 0,
+    };
+
+    const targetLidY = baseLidY + (lidOffsets[emotion] ?? 0);
+    const targetRotZ = lidRotations[emotion] ?? 0;
+    const lerpFactor = 0.2;
+
+    if (leftEyelidRef.current) {
+      leftEyelidRef.current.position.y = THREE.MathUtils.lerp(
+        leftEyelidRef.current.position.y,
+        targetLidY,
+        lerpFactor
+      );
+      leftEyelidRef.current.rotation.z = THREE.MathUtils.lerp(
+        leftEyelidRef.current.rotation.z,
+        targetRotZ,
+        lerpFactor
+      );
+    }
+
+    if (rightEyelidRef.current) {
+      rightEyelidRef.current.position.y = THREE.MathUtils.lerp(
+        rightEyelidRef.current.position.y,
+        targetLidY,
+        lerpFactor
+      );
+      rightEyelidRef.current.rotation.z = THREE.MathUtils.lerp(
+        rightEyelidRef.current.rotation.z,
+        -targetRotZ, // mirror rotation for symmetry
+        lerpFactor
+      );
+    }
   });
 
   const {
@@ -873,25 +926,45 @@ const Character = forwardRef(function Character(
             args={[headSize, headSize, headSize]}
             color={colorHead}
           />
-          {/* Eyes */}
+          {/* Left Eye */}
           <group position={[-eyeOffsetX, eyeOffsetY, eyeZ]}>
+            {/* Eye white */}
             <mesh>
               <circleGeometry args={[eyeSize, 16]} />
               <meshStandardMaterial color="white" />
             </mesh>
-            <mesh ref={leftPupilRef}>
+
+            {/* Pupil */}
+            <mesh ref={leftPupilRef} position={[0, 0, 0.01]}>
               <circleGeometry args={[eyeSize / 3, 16]} />
               <meshStandardMaterial color="black" />
+            </mesh>
+
+            {/* Upper Eyelid */}
+            <mesh ref={leftEyelidRef} position={[0, -0.015, 0]}>
+              <circleGeometry args={[eyeSize * 1.2, 16, 0, Math.PI]} />
+              <meshStandardMaterial color={colorHead} />
             </mesh>
           </group>
+
+          {/* Right Eye */}
           <group position={[eyeOffsetX, eyeOffsetY, eyeZ]}>
+            {/* Eye white */}
             <mesh>
               <circleGeometry args={[eyeSize, 16]} />
               <meshStandardMaterial color="white" />
             </mesh>
-            <mesh ref={rightPupilRef}>
+
+            {/* Pupil */}
+            <mesh ref={rightPupilRef} position={[0, 0, 0.01]}>
               <circleGeometry args={[eyeSize / 3, 16]} />
               <meshStandardMaterial color="black" />
+            </mesh>
+
+            {/* Upper Eyelid */}
+            <mesh ref={rightEyelidRef} position={[0, -0.015, 0]}>
+              <circleGeometry args={[eyeSize * 1.2, 16, 0, Math.PI]} />
+              <meshStandardMaterial color={colorHead} />
             </mesh>
           </group>
         </group>
