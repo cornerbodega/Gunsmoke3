@@ -1,9 +1,15 @@
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls, Environment } from "@react-three/drei";
 import { Suspense } from "react";
+import React, { forwardRef, useImperativeHandle } from "react";
+
 import * as THREE from "three";
 import { useLoader } from "@react-three/fiber";
 import { TextureLoader } from "three";
+import { useEffect, useMemo, useRef, useState } from "react";
+
+import { useFrame } from "@react-three/fiber";
+
 // Reusable box mesh
 function Box({ position, rotation, args, color = "#5b3b1d", ...props }) {
   return (
@@ -200,6 +206,15 @@ const WindowedWall = ({ position, rotation }) => {
 
 // Main Scene
 export default function Home() {
+  const standingRef = useRef();
+  const sittingRef = useRef();
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setReady(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
+
   return (
     <div style={{ width: "100vw", height: "100vh" }}>
       <Canvas
@@ -214,7 +229,7 @@ export default function Home() {
       >
         <Suspense fallback={null}>
           {/* Lighting */}
-          <Environment preset="city" background={false} />
+          {/* <Environment preset="city" background={false} /> */}
           <hemisphereLight skyColor="white" groundColor="#444" intensity={0} />
           <directionalLight
             castShadow
@@ -274,19 +289,27 @@ export default function Home() {
           {/* Jury + Steno */}
           <StenographerStation />
           <JuryBox position={[18, 0, -10]} rotation={[0, Math.PI / 2, 0]} />
-          {/* Standing */}
-          <Character position={[0, 0, -10]} />
-
-          {/* Sitting in chair */}
-          <Character
-            position={[-3.5, 0, -3.5]}
-            params={{
-              sitting: true,
-              // torsoLean: 0.3, // leaning forward
-              torsoLean: 0, // neutral
-              // torsoLean: -0.3, // leaning back
-            }}
-          />
+          {/* Standing Character */}
+          {ready && (
+            <>
+              <Character
+                ref={standingRef}
+                position={[0, 0, -10]}
+                params={{
+                  eyeTargetRef: sittingRef.current?.headRef || null,
+                }}
+              />
+              <Character
+                ref={sittingRef}
+                position={[-3.5, 0, -3.5]}
+                params={{
+                  sitting: true,
+                  torsoLean: 0,
+                  eyeTargetRef: standingRef.current?.headRef || null,
+                }}
+              />
+            </>
+          )}
 
           {/* Ceiling Lights */}
           {[-10, 0, 10].flatMap((x) =>
@@ -547,12 +570,52 @@ const CeilingLight = ({ position = [0, 0, 0] }) => {
   );
 };
 
-function Character({
-  position = [0, 0, 0],
-  rotation = [0, 0, 0],
-  params = {},
-}) {
-  // Extract and default params
+const Character = forwardRef(function Character(
+  { position = [0, 0, 0], rotation = [0, 0, 0], params = {} },
+  ref
+) {
+  const headRef = useRef();
+  const leftPupilRef = useRef();
+  const rightPupilRef = useRef();
+
+  useFrame(() => {
+    if (!params.eyeTargetRef?.current || !headRef.current) return;
+
+    const headWorldPos = new THREE.Vector3();
+    const eyeTargetWorldPos = new THREE.Vector3();
+
+    headRef.current.getWorldPosition(headWorldPos);
+    params.eyeTargetRef.current.getWorldPosition(eyeTargetWorldPos);
+
+    // Direction vector from head to target
+    const dir = new THREE.Vector3()
+      .subVectors(eyeTargetWorldPos, headWorldPos)
+      .normalize();
+
+    // Convert to head's local space
+    const localDir = headRef.current
+      .worldToLocal(headWorldPos.clone().add(dir))
+      .normalize();
+
+    // Clamp pupil movement
+    const maxOffset = 0.03;
+    const pupilX = THREE.MathUtils.clamp(
+      localDir.x * 0.1,
+      -maxOffset,
+      maxOffset
+    );
+    const pupilY = THREE.MathUtils.clamp(
+      localDir.y * 0.1,
+      -maxOffset,
+      maxOffset
+    );
+
+    if (leftPupilRef.current)
+      leftPupilRef.current.position.set(pupilX, pupilY, 0.02);
+    if (rightPupilRef.current)
+      rightPupilRef.current.position.set(pupilX, pupilY, 0.02);
+  });
+
   const {
     sitting = false,
     torsoLean = 0,
@@ -562,21 +625,18 @@ function Character({
     colorHead = "#ffe0bd",
   } = params;
 
-  // Dimensions
+  useImperativeHandle(ref, () => ({
+    headRef,
+  }));
+
   const legHeight = 0.75;
   const torsoHeight = 1.25;
   const headSize = 0.7;
   const armHeight = 1;
 
-  const legWidth = 0.3;
-  const torsoWidth = 1;
-  const armWidth = 0.3;
-
   const legRotation = sitting ? Math.PI / 2.2 : 0;
-
   const hipY = legHeight;
   const hipZ = sitting ? 0.4 : 0;
-
   const finalRotation = sitting
     ? [rotation[0], rotation[1] + Math.PI, rotation[2]]
     : rotation;
@@ -585,54 +645,75 @@ function Character({
   const headCenterY = torsoHeight + headSize / 2;
   const armCenterY = torsoHeight / 2;
 
+  const eyeOffsetX = 0.15;
+  const eyeOffsetY = 0.1;
+  const eyeZ = headSize / 2 + 0.01;
+  const eyeSize = 0.08;
+
   return (
     <group position={position} rotation={finalRotation}>
       {/* Legs */}
       <group position={[0, hipY, hipZ]}>
-        <group position={[-0.25, 0, 0]} rotation={[legRotation, 0, 0]}>
-          <Box
-            position={[0, -legHeight / 2, 0]}
-            args={[legWidth, legHeight, legWidth]}
-            color={colorLegs}
-          />
-        </group>
-        <group position={[0.25, 0, 0]} rotation={[legRotation, 0, 0]}>
-          <Box
-            position={[0, -legHeight / 2, 0]}
-            args={[legWidth, legHeight, legWidth]}
-            color={colorLegs}
-          />
-        </group>
+        {[-0.25, 0.25].map((x, idx) => (
+          <group key={idx} position={[x, 0, 0]} rotation={[legRotation, 0, 0]}>
+            <Box
+              position={[0, -legHeight / 2, 0]}
+              args={[0.3, legHeight, 0.3]}
+              color={colorLegs}
+            />
+          </group>
+        ))}
       </group>
 
-      {/* Torso, Arms, Head */}
+      {/* Torso + Arms + Head */}
       <group position={[0, hipY, 0]} rotation={[torsoLean, 0, 0]}>
         {/* Torso */}
         <Box
           position={[0, torsoCenterY, 0]}
-          args={[torsoWidth, torsoHeight, 0.6]}
+          args={[1, torsoHeight, 0.6]}
           color={colorTorso}
         />
-
         {/* Arms */}
         <Box
-          position={[-(torsoWidth / 2 + armWidth / 2), armCenterY, 0]}
-          args={[armWidth, armHeight, armWidth]}
+          position={[-0.65, armCenterY, 0]}
+          args={[0.3, armHeight, 0.3]}
           color={colorArms}
         />
         <Box
-          position={[torsoWidth / 2 + armWidth / 2, armCenterY, 0]}
-          args={[armWidth, armHeight, armWidth]}
+          position={[0.65, armCenterY, 0]}
+          args={[0.3, armHeight, 0.3]}
           color={colorArms}
         />
-
         {/* Head */}
-        <Box
-          position={[0, headCenterY, 0]}
-          args={[headSize, headSize, headSize]}
-          color={colorHead}
-        />
+        <group ref={headRef} position={[0, headCenterY, 0]}>
+          <Box
+            position={[0, 0, 0]}
+            args={[headSize, headSize, headSize]}
+            color={colorHead}
+          />
+          {/* Eyes (with pupils) */}
+          <group position={[-eyeOffsetX, eyeOffsetY, eyeZ]}>
+            <mesh>
+              <circleGeometry args={[eyeSize, 16]} />
+              <meshStandardMaterial color="white" />
+            </mesh>
+            <mesh ref={leftPupilRef}>
+              <circleGeometry args={[eyeSize / 3, 16]} />
+              <meshStandardMaterial color="black" />
+            </mesh>
+          </group>
+          <group position={[eyeOffsetX, eyeOffsetY, eyeZ]}>
+            <mesh>
+              <circleGeometry args={[eyeSize, 16]} />
+              <meshStandardMaterial color="white" />
+            </mesh>
+            <mesh ref={rightPupilRef}>
+              <circleGeometry args={[eyeSize / 3, 16]} />
+              <meshStandardMaterial color="black" />
+            </mesh>
+          </group>
+        </group>
       </group>
     </group>
   );
-}
+});
