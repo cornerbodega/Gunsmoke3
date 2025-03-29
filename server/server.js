@@ -10,23 +10,29 @@ const port = 3001;
 app.use(cors());
 
 const upload = multer({
-  dest: "uploads/", // write to disk instead of memory
-  limits: { fileSize: 200 * 1024 * 1024 }, // allow up to 200MB
+  dest: "uploads/",
+  limits: { fileSize: 200 * 1024 * 1024 }, // 200MB limit
 });
 
-const { encode, decode } = require("gpt-3-encoder");
+/**
+ * Character-based chunking with overlap.
+ *
+ * @param {string} text - Full text to split
+ * @param {number} maxChars - Max chars per chunk (e.g., 7000)
+ * @param {number} overlap - Overlap between chunks (e.g., 500)
+ * @returns {string[]} Array of chunked text
+ */
+function splitTextByChars(text, maxChars = 7000, overlap = 500) {
+  const chunks = [];
+  let i = 0;
 
-function splitIntoBatches(text, maxTokens = 6500, overlap = 500) {
-  const tokens = encode(text);
-  const batches = [];
-
-  for (let i = 0; i < tokens.length; i += maxTokens - overlap) {
-    const chunk = tokens.slice(i, i + maxTokens);
-    const decodedChunk = decode(chunk);
-    batches.push(decodedChunk);
+  while (i < text.length) {
+    const end = Math.min(i + maxChars, text.length);
+    chunks.push(text.slice(i, end));
+    i += maxChars - overlap;
   }
 
-  return batches;
+  return chunks;
 }
 
 app.post("/upload", upload.single("pdf"), async (req, res) => {
@@ -38,8 +44,12 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
     // Clean up uploaded file
     fs.unlinkSync(filePath);
 
+    // Split into character chunks with some overlap
+    const chunks = splitTextByChars(parsed.text, 7000, 500);
+
     res.json({
-      text: parsed.text,
+      chunks, // The actual text chunks
+      chunkCount: chunks.length,
       numpages: parsed.numpages,
       info: parsed.info,
     });

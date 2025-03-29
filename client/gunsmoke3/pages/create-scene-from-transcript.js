@@ -16,11 +16,9 @@ export default function CreateScene() {
     });
 
     const data = await res.json();
-
     if (res.ok) {
-      setPdfText(data.text);
-    } else {
-      console.error("Error:", data.error);
+      const combinedText = data.chunks.join("<<<CHUNK_BREAK>>>");
+      setPdfText(combinedText);
     }
   };
 
@@ -39,10 +37,17 @@ export default function CreateScene() {
       */}
 
       <input type="file" accept="application/pdf" onChange={handleFileUpload} />
-
       {pdfText && (
-        <div className="mt-4 whitespace-pre-wrap border p-4 rounded bg-gray-100 max-h-[500px] overflow-auto">
-          {pdfText}
+        <div className="mt-4 space-y-6 max-h-[500px] overflow-auto">
+          {pdfText.split("<<<CHUNK_BREAK>>>").map((chunk, i) => (
+            <div
+              key={i}
+              className="whitespace-pre-wrap border p-4 rounded bg-gray-100"
+            >
+              <strong>Chunk {i + 1}</strong>
+              <div className="mt-2">{chunk}</div>
+            </div>
+          ))}
         </div>
       )}
     </div>
