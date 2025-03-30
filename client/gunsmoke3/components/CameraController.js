@@ -3,7 +3,7 @@ import { useEffect, useRef, useMemo } from "react";
 
 import * as THREE from "three";
 
-export default function CameraController() {
+export default function CameraController({ activePreset }) {
   const { camera } = useThree();
   const cameraTarget = useRef(new THREE.Vector3());
 
@@ -13,7 +13,6 @@ export default function CameraController() {
         position: new THREE.Vector3(0, 10, 19.6),
         lookAt: new THREE.Vector3(0, 5, 0),
       },
-
       crossExaminationFromWell: {
         position: new THREE.Vector3(-17, 4, -10.5),
         lookAt: new THREE.Vector3(0, 3, -10),
@@ -27,14 +26,13 @@ export default function CameraController() {
         lookAt: new THREE.Vector3(-10, 3, -15),
       },
       prosecutor_table: {
-        position: new THREE.Vector3(-4, 3.5, 3), // more front-facing
-        lookAt: new THREE.Vector3(-4.5, 2.5, -0.5), // eyes/mouth target
+        position: new THREE.Vector3(-4, 3.5, 3),
+        lookAt: new THREE.Vector3(-4.5, 2.5, -0.5),
       },
       defense_table: {
-        position: new THREE.Vector3(5.5, 2.8, 3.5), // Slight angle, slightly above eye level
-        lookAt: new THREE.Vector3(4.5, 2.5, -0.5), // Looking at speaker’s face
+        position: new THREE.Vector3(5.5, 2.8, 3.5),
+        lookAt: new THREE.Vector3(4.5, 2.5, -0.5),
       },
-
       bailiff_reaction: {
         position: new THREE.Vector3(9, 3, -6),
         lookAt: new THREE.Vector3(8, 2.5, -12),
@@ -48,13 +46,18 @@ export default function CameraController() {
   );
 
   const presetNames = Object.keys(cameraPresets);
-  const current = useRef(0);
+  const current = useRef(presetNames.indexOf(activePreset) || 0);
+
+  useEffect(() => {
+    current.current = presetNames.indexOf(activePreset);
+  }, [activePreset, presetNames]);
 
   useEffect(() => {
     const handleKey = (e) => {
       if (e.key.toLowerCase() === "c") {
         current.current = (current.current + 1) % presetNames.length;
-        console.log("Camera angle:", presetNames[current.current]);
+        console.log("📷 Manual camera angle:", presetNames[current.current]);
+        // Optional: trigger override mode here
       }
     };
     window.addEventListener("keydown", handleKey);
@@ -62,7 +65,9 @@ export default function CameraController() {
   }, [presetNames]);
 
   useFrame(() => {
-    const target = cameraPresets[presetNames[current.current]];
+    const target =
+      cameraPresets[presetNames[current.current]] ||
+      cameraPresets["wide_establishing"];
     camera.position.lerp(target.position, 0.05);
     cameraTarget.current.lerp(target.lookAt, 0.05);
     camera.lookAt(cameraTarget.current);
