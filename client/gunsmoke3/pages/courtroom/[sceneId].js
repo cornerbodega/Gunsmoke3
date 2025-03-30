@@ -10,6 +10,31 @@ import { TextureLoader } from "three";
 import { useEffect, useRef, useState } from "react";
 
 import { useFrame } from "@react-three/fiber";
+import { getSupabase } from "@/utils/supabase";
+
+export async function getServerSideProps(context) {
+  const supabase = getSupabase();
+  const { sceneId } = context.params;
+
+  const { data: lines, error } = await supabase
+    .from("gs3_lines")
+    .select("line_id, line_obj")
+    .eq("scene_id", sceneId)
+    .order("line_id", { ascending: true });
+
+  if (error) {
+    console.error("❌ Error fetching lines:", error.message);
+    return { props: { lines: [], sceneId } };
+  }
+  console.log(`✅ Fetched ${lines.length} lines for scene ${sceneId}`);
+
+  return {
+    props: {
+      lines,
+      sceneId,
+    },
+  };
+}
 
 // Reusable box mesh
 function Box({ position, rotation, args, color = "#5b3b1d", ...props }) {
@@ -206,7 +231,7 @@ const WindowedWall = ({ position, rotation }) => {
 };
 
 // Main Scene
-export default function Home() {
+export default function Home({ lines, sceneId }) {
   const standingRef = useRef();
   const sittingRef = useRef();
   const [ready, setReady] = useState(false);
@@ -214,6 +239,91 @@ export default function Home() {
   const witnessRef = useRef();
   const [judgeHeadRef, setJudgeHeadRef] = useState(null);
   const [witnessHeadRef, setWitnessHeadRef] = useState(null);
+
+  const [currentIndex, setCurrentIndex] = useState(-1);
+  const [audioMap, setAudioMap] = useState({});
+  const [activeSpeakerId, setActiveSpeakerId] = useState(null);
+
+  const characterRefs = useRef({}); // All character refs
+
+  const visemePlayer = useVisemePlayer(); // 👇 defined in Step 2 below
+
+  // Register characters by their unique character_id
+  const registerCharacter = (id, ref) => {
+    if (ref && ref.current) {
+      characterRefs.current[id] = ref.current;
+    }
+  };
+
+  // Get headRef of whoever is speaking
+  const getSpeakerHeadRef = () => {
+    return activeSpeakerId
+      ? characterRefs.current[activeSpeakerId]?.headRef
+      : null;
+  };
+  useEffect(() => {
+    const map = {};
+    lines.forEach(({ line_id, line_obj }) => {
+      const audio = new Audio(line_obj.audio_url.trim());
+      audio.preload = "auto";
+      map[line_id] = audio;
+    });
+    setAudioMap(map);
+  }, [lines]);
+  function useVisemePlayer() {
+    const [viseme, setViseme] = useState("rest");
+    const timeouts = useRef([]);
+
+    const play = (visemeData, onDone) => {
+      stop();
+      visemeData?.frames?.forEach((frame) => {
+        const timeout = setTimeout(() => {
+          setViseme(frame.viseme);
+        }, frame.time * 1000);
+        timeouts.current.push(timeout);
+      });
+      const done = setTimeout(() => {
+        setViseme("rest");
+        onDone?.();
+      }, visemeData.duration * 1000);
+      timeouts.current.push(done);
+    };
+
+    const stop = () => {
+      timeouts.current.forEach(clearTimeout);
+      timeouts.current = [];
+      setViseme("rest");
+    };
+
+    return { viseme, play, stop };
+  }
+  useEffect(() => {
+    const handleKey = (e) => {
+      if (e.key !== "Enter") return;
+
+      const nextIndex = currentIndex + 1;
+      if (nextIndex >= lines.length) return;
+
+      const { line_id, line_obj } = lines[nextIndex];
+      const audio = audioMap[line_id];
+
+      if (audio) {
+        audio.currentTime = 0;
+        audio.play();
+      }
+
+      setActiveSpeakerId(line_obj.character_id);
+
+      visemePlayer.play(line_obj.viseme_data, () => {
+        console.log("🎤 Finished line", line_id);
+      });
+
+      setCurrentIndex(nextIndex);
+    };
+
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [currentIndex, lines, audioMap]);
 
   useEffect(() => {
     const id = requestAnimationFrame(() => setReady(true));
@@ -230,40 +340,65 @@ export default function Home() {
     },
   };
 
-  const characterDefaults = {
-    judge: {
+  const zoneMap = {
+    // Judge
+    judge_bench: {
       position: [0, 2, -18],
       rotation: [0, Math.PI, 0],
     },
-    plaintiff1: {
-      position: [-6.5, -0.05, -0.5],
-      rotation: [0, 0, 0],
-    },
-    plaintiff2: {
-      position: [-3.5, -0.05, -0.5],
-      rotation: [0, 0, 0],
-    },
-    defense1: {
-      position: [3.5, -0.05, -0.5],
-      rotation: [0, 0, 0],
-    },
-    defense2: {
-      position: [6.5, -0.05, -0.5],
-      rotation: [0, 0, 0],
-    },
-    witness: {
+
+    // Witness
+    witness_stand: {
       position: [-10, 1.1, -15],
       rotation: [0, Math.PI, 0],
     },
-    stenographer: {
+
+    // Stenographer
+    stenographer_station: {
       position: [-17.5, 0, -8],
       rotation: [0, -Math.PI / 2, 0],
     },
-    bailiff: {
+
+    // Bailiff
+    bailiff_post: {
       position: [8, 0, -12],
       rotation: [0, 0, 0],
       scale: [1.3, 1.3, 1.3],
     },
+
+    // Prosecutor / Plaintiff table
+    prosecutor_table_left: {
+      position: [-6.5, -0.05, -0.5],
+      rotation: [0, 0, 0],
+    },
+    prosecutor_table_right: {
+      position: [-3.5, -0.05, -0.5],
+      rotation: [0, 0, 0],
+    },
+
+    // Defense table
+    defense_table_left: {
+      position: [3.5, -0.05, -0.5],
+      rotation: [0, 0, 0],
+    },
+    defense_table_right: {
+      position: [6.5, -0.05, -0.5],
+      rotation: [0, 0, 0],
+    },
+
+    // At the well (standing)
+    cross_examination_well: {
+      position: [-10.5, -0.05, -8.5],
+      rotation: [0, Math.PI, 0],
+    },
+  };
+  const getLocationPose = (zoneKey) => {
+    const zone = zoneMap[zoneKey];
+    return {
+      position: zone?.position ?? [0, 0, 0],
+      rotation: zone?.rotation ?? [0, 0, 0],
+      scale: zone?.scale ?? [1, 1, 1],
+    };
   };
 
   const getPose = (role, overridePose = null) => {
@@ -277,7 +412,7 @@ export default function Home() {
     <div style={{ width: "100vw", height: "100vh" }}>
       <Canvas
         shadows
-        camera={{ position: [0, 25, 40], fov: 45 }}
+        camera={{ position: [0, 25, 19], fov: 45 }}
         style={{ background: "#222" }}
         gl={{
           outputEncoding: THREE.sRGBEncoding,
@@ -357,88 +492,91 @@ export default function Home() {
             <>
               {/* Judge */}
               <Character
-                ref={judgeRef}
-                position={getPose("judge").position}
-                rotation={getPose("judge").rotation}
-                onReady={setJudgeHeadRef}
+                ref={(ref) => registerCharacter("judge", ref)}
+                {...getLocationPose("judge_bench")}
+                onReady={(ref) => registerCharacter("judge", ref)}
                 params={{
                   role: "judge",
                   sitting: true,
                   colorTorso: "#222",
-                  eyeTargetRef: witnessHeadRef,
+                  eyeTargetRef: getSpeakerHeadRef(),
                   emotion: "angry",
                 }}
               />
 
               {/* Plaintiff at the well */}
               <Character
-                position={getPose("plaintiff1", "atWell").position}
-                rotation={getPose("plaintiff1", "atWell").rotation}
+                ref={(ref) => registerCharacter("jessicachan", ref)}
+                {...getLocationPose("cross_examination_well")}
+                onReady={(ref) => registerCharacter("jessicachan", ref)}
                 params={{
                   role: "plaintiff1",
                   sitting: false,
                   colorTorso: "#1e90ff",
-                  eyeTargetRef: witnessHeadRef,
+                  eyeTargetRef: getSpeakerHeadRef(),
                 }}
               />
 
-              {/* Plaintiff 2 at table */}
+              {/* Plaintiff 2 at table (right seat) */}
               <Character
-                position={getPose("plaintiff2").position}
-                rotation={getPose("plaintiff2").rotation}
+                ref={(ref) => registerCharacter("plaintiff2", ref)}
+                {...getLocationPose("prosecutor_table_right")}
+                onReady={(ref) => registerCharacter("plaintiff2", ref)}
                 params={{
                   role: "plaintiff2",
                   sitting: true,
                   colorTorso: "#1e90ff",
-                  eyeTargetRef: judgeHeadRef,
+                  eyeTargetRef: getSpeakerHeadRef(),
                 }}
               />
 
               {/* Defense team */}
               <Character
-                position={getPose("defense1").position}
-                rotation={getPose("defense1").rotation}
+                ref={(ref) => registerCharacter("defense1", ref)}
+                {...getLocationPose("defense_table_left")}
+                onReady={(ref) => registerCharacter("defense1", ref)}
                 params={{
                   role: "defense1",
                   sitting: true,
                   colorTorso: "#32cd32",
-                  eyeTargetRef: judgeHeadRef,
+                  eyeTargetRef: getSpeakerHeadRef(),
                 }}
               />
               <Character
-                position={getPose("defense2").position}
-                rotation={getPose("defense2").rotation}
+                ref={(ref) => registerCharacter("defense2", ref)}
+                {...getLocationPose("defense_table_right")}
+                onReady={(ref) => registerCharacter("defense2", ref)}
                 params={{
                   role: "defense2",
                   sitting: true,
                   colorTorso: "#32cd32",
-                  eyeTargetRef: judgeHeadRef,
+                  eyeTargetRef: getSpeakerHeadRef(),
                 }}
               />
 
               {/* Witness */}
               <Character
-                ref={witnessRef}
-                position={getPose("witness").position}
-                rotation={getPose("witness").rotation}
-                onReady={setWitnessHeadRef}
+                ref={(ref) => registerCharacter("elizabethholmes", ref)}
+                {...getLocationPose("witness_stand")}
+                onReady={(ref) => registerCharacter("elizabethholmes", ref)}
                 params={{
                   role: "witness",
                   sitting: true,
                   colorTorso: "#ffd700",
-                  eyeTargetRef: judgeHeadRef,
+                  eyeTargetRef: getSpeakerHeadRef(),
                 }}
               />
 
               {/* Stenographer */}
               <Character
-                position={getPose("stenographer").position}
-                rotation={getPose("stenographer").rotation}
+                ref={(ref) => registerCharacter("stenographer", ref)}
+                {...getLocationPose("stenographer_station")}
+                onReady={(ref) => registerCharacter("stenographer", ref)}
                 params={{
                   role: "stenographer",
                   sitting: true,
                   colorTorso: "#9932cc",
-                  eyeTargetRef: judgeHeadRef,
+                  eyeTargetRef: getSpeakerHeadRef(),
                 }}
               />
 
@@ -446,12 +584,14 @@ export default function Home() {
               {[...Array(6)].map((_, i) => (
                 <Character
                   key={`jury-${i}`}
+                  ref={(ref) => registerCharacter(`jury-${i}`, ref)}
                   position={[18, 0, -13 + i * 1.3]}
                   rotation={[0, Math.PI / 2, 0]}
+                  onReady={(ref) => registerCharacter(`jury-${i}`, ref)}
                   params={{
                     sitting: true,
                     colorTorso: "#8b4513",
-                    eyeTargetRef: judgeHeadRef,
+                    eyeTargetRef: getSpeakerHeadRef(),
                   }}
                 />
               ))}
@@ -465,14 +605,16 @@ export default function Home() {
                     [-3.5, 11],
                     [12, 14],
                   ].some(([sx, sz]) => sx === x && sz === z);
-
                   if (skip) return null;
 
+                  const id = `audience-${x}-${z}`;
                   return (
                     <Character
-                      key={`audience-${x}-${z}`}
+                      key={id}
+                      ref={(ref) => registerCharacter(id, ref)}
                       position={[x, 0, z]}
                       rotation={[0, 0, 0]}
+                      onReady={(ref) => registerCharacter(id, ref)}
                       params={{
                         sitting: true,
                         colorTorso: [
@@ -481,7 +623,7 @@ export default function Home() {
                           "#daa520",
                           "#008b8b",
                         ][i % 4],
-                        eyeTargetRef: judgeHeadRef,
+                        eyeTargetRef: getSpeakerHeadRef(),
                       }}
                     />
                   );

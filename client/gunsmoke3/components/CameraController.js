@@ -14,7 +14,7 @@ export default function CameraController() {
         lookAt: new THREE.Vector3(0, 5, 0),
       },
 
-      crossExamiantionFromWell: {
+      crossExaminationFromWell: {
         position: new THREE.Vector3(-17, 4, -10.5),
         lookAt: new THREE.Vector3(0, 3, -10),
       },

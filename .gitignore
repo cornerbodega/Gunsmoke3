@@ -1,0 +1,5 @@
+server/node_modules/*
+client/gunsmoke3/node_modules*
+client/gunsmoke3/*next*
+client/gunsmoke3/tmp
+.env
