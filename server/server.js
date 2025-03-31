@@ -251,6 +251,7 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
         zone: metadata.zone,
         camera: metadata.camera,
         eye_target: metadata.eye_target,
+        pause_before: metadata.pause_before,
         audio_url: metadata.audio_url,
         viseme_data: metadata.viseme_data,
         role: speakerInfo?.role || "unknown",
@@ -320,15 +321,16 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
     }
     async function generateSceneMetadata({ text, speaker, previousLineJson }) {
       const prompt = `
-      You're helping animate courtroom scenes. Given a character's current line of dialog and the full metadata of the previous line, return updated metadata for the current line in the following JSON format:
+      You're helping animate courtroom scenes. Given a character's current line of dialog and the full metadata of the previous line, return updated metadata for the current line in the following JSON format using the exact value options if specified:
       
       {
         "posture": "sitting" or "standing",
         "emotion": "neutral" or "tense" or "confident" or "nervous" or "defensive",
         "zone": "judge_bench" or "witness_stand" or "prosecutor_table_left" or "prosecutor_table_right" or "defense_table_left" or "defense_table_right" or "cross_examination_well",
         "camera": "wide_establishing" or "crossExaminationFromWell" or "judge_closeup" or "witness_closeup" or "prosecutor_table" or "defense_table" or "bailiff_reaction" or "wide_view_from_jury",
-        "role": "judge" or "witness" or "prosecutor1" or "prosecutor2"" or "defense" or "defendant" or "jury",
+        "role": "judge" or "witness" or "prosecutor1" or "prosecutor2" or "defense1" or "defendant" or "jury"
         "eye_target": "judge" or "witness" or "prosecutor1" or "prosecutor2"" or "defense" or "defendant" or "jury",
+        "pause_before": "choose a number with respect to previous line for cinematic timing",
       }
       
       Use the prior metadata to keep scene continuity but adapt based on the new dialog. DO NOT wrap your response in markdown or explanation — just return the raw JSON only.
@@ -368,6 +370,7 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
 
     console.log("✅ All lines saved. Starting audio generation...");
     await generateAudioAndVisemes(sceneId);
+    await generateCharacterStyles(sceneId);
     const sceneMetadata = {
       scene_id: sceneId,
       scene_name:
@@ -500,6 +503,7 @@ async function generateAudioAndVisemes(sceneId) {
         audio_url: audioUrl,
         viseme_data: visemeData,
       };
+
       console.log(`gs3_lines`, updatedLineObj);
 
       const { error: updateErr } = await supabase
@@ -736,6 +740,110 @@ async function analyzeRawDocument(text) {
       participants: [],
       summary: "Could not analyze document",
     };
+  }
+}
+
+async function generateCharacterStyles(sceneId) {
+  try {
+    const { data: rows, error } = await supabase
+      .from("gs3_lines")
+      .select("line_id, line_obj")
+      .eq("scene_id", sceneId);
+
+    if (error) throw new Error(error.message);
+
+    // Step 1: Build set of unique character_ids
+    const characterIds = new Set();
+    for (const row of rows) {
+      const characterId = row.line_obj.character_id;
+      if (characterId) characterIds.add(characterId);
+    }
+
+    // Step 2: Generate all styles in memory
+    const styleMap = new Map();
+    for (const characterId of characterIds) {
+      const style = await getStyleForCharacter(characterId);
+      styleMap.set(characterId, style);
+    }
+
+    // Step 3: Update lines using the styleMap
+    for (const row of rows) {
+      const { line_id, line_obj } = row;
+      const characterId = line_obj.character_id;
+
+      const updatedLineObj = {
+        ...line_obj,
+        style: styleMap.get(characterId),
+      };
+
+      const { error: updateErr } = await supabase
+        .from("gs3_lines")
+        .update({ line_obj: updatedLineObj })
+        .eq("scene_id", sceneId)
+        .eq("line_id", line_id);
+
+      if (updateErr) {
+        console.error(
+          `❌ Failed to update style for line ${line_id}:`,
+          updateErr.message
+        );
+      } else {
+        console.log(`🎨 Applied style for ${characterId} on line ${line_id}`);
+      }
+    }
+
+    console.log("🎉 All character styles applied successfully.");
+  } catch (err) {
+    console.error("🚨 Error in generateCharacterStyles:", err.message);
+  }
+}
+
+async function getStyleForCharacter(character_id) {
+  const example = {
+    hair_color: "#2f2f2f",
+    hair_style: 'choose either "long" or "bald"',
+    skin_color: "#d2a67a",
+    shirt_color: "#0047AB",
+    pants_color: "#1a1a1a",
+  };
+
+  const prompt = `
+You are creating stylized character designs for a courtroom animation. Given the character ID (like "jessicachan" or "elizabethholmes"), create a consistent color/styling profile.
+
+Return JSON only in this format:
+
+${JSON.stringify(example, null, 2)}
+
+Only use hex codes for colors. Choose appropriate combinations for professional courtroom attire.
+Do NOT wrap your response in markdown.
+Character ID: ${character_id}
+`;
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [{ role: "system", content: prompt }],
+    });
+
+    const content = response.choices[0].message.content.trim();
+    const jsonText = content
+      .replace(/^```(?:json)?\s*/i, "")
+      .replace(/```$/, "")
+      .trim();
+
+    return JSON.parse(jsonText);
+  } catch (err) {
+    console.error(
+      `❌ Failed to generate style for ${character_id}:`,
+      err.message || err
+    );
+    return {
+      hair_color: "#000000",
+      hair_style: "short",
+      skin_color: "#cccccc",
+      shirt_color: "#888888",
+      pants_color: "#444444",
+    }; // fallback
   }
 }
 

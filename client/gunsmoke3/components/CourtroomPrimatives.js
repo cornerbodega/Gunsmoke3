@@ -10,7 +10,7 @@ import { useLoader, useFrame } from "@react-three/fiber";
 import { Cylinder } from "@react-three/drei";
 import * as THREE from "three";
 import { TextureLoader } from "three";
-
+import MouthViseme from "@/components/MouthViseme";
 // Reusable box mesh
 export function Box({ position, rotation, args, color = "#5b3b1d", ...props }) {
   return (
@@ -411,6 +411,26 @@ export const CeilingLight = ({ position = [0, 0, 0], chainLength = 12.5 }) => {
   );
 };
 
+export const ClerkBox = ({
+  position = [10, 0, -15],
+  rotation = [0, Math.PI, 0],
+}) => (
+  <group position={position} rotation={rotation}>
+    <Box position={[0, 0.25, 0]} args={[4.5, 0.5, 4.5]} color="#3c2f2f" />
+    <Box position={[0, 1.5, -2.25]} args={[4, 2, 0.2]} color="#4a2c14" />
+    <Box position={[-2, 1.5, 0]} args={[0.2, 2, 4.5]} color="#4c2c14" />
+    <Box position={[2, 1.5, 0]} args={[0.2, 2, 4.5]} color="#4c2c14" />
+    <Box position={[0, 1.5, 2.25]} args={[4, 2, 0.2]} color="#4c2c14" />
+    <Box position={[0, 2.55, -2.25]} args={[4, 0.1, 0.1]} color="#3c2f2f" />
+    <Box position={[-2, 2.55, 0]} args={[0.1, 0.1, 4.5]} color="#3c2f2f" />
+    <Box position={[2, 2.55, 0]} args={[0.1, 0.1, 4.5]} color="#3c2f2f" />
+    <Box position={[0, 2.55, 2.25]} args={[4, 0.1, 0.1]} color="#3c2f2f" />
+    <Box position={[0, 2, -1.2]} args={[3.5, 0.2, 1]} color="#3c2f2f" />
+    <Box position={[0, 2.15, -1.2]} args={[3.5, 0.05, 1]} color="#2e2e2e" />
+    <SingleChair position={[0, 0, 1.2]} rotation={[0, 0, 0]} />
+  </group>
+);
+
 // =========================
 // CHARACTER COMPONENT
 // =========================
@@ -543,11 +563,17 @@ export const Character = forwardRef(function Character(
   const {
     sitting = false,
     torsoLean = 0,
-    colorTorso = "#ff4444",
-    colorLegs = "#4444ff",
-    colorArms = "#4444ff",
-    colorHead = "#ffe0bd",
+    style = {},
+    emotion = "neutral",
   } = params;
+
+  const {
+    hair_color = "#2e2e2e",
+    hair_style = "none",
+    skin_color = "#ffe0bd",
+    pants_color = "#4444ff",
+    shirt_color = "#ff4444",
+  } = style;
 
   const legHeight = 0.75;
   const torsoHeight = 1.25;
@@ -576,36 +602,62 @@ export const Character = forwardRef(function Character(
             <Box
               position={[0, -legHeight / 2, 0]}
               args={[0.3, legHeight, 0.3]}
-              color={colorLegs}
+              color={pants_color}
             />
           </group>
         ))}
       </group>
-
       <group position={[0, hipY, 0]} rotation={[torsoLean, 0, 0]}>
         <Box
           position={[0, torsoCenterY, 0]}
           args={[1, torsoHeight, 0.6]}
-          color={colorTorso}
+          color={shirt_color}
         />
         <Box
           position={[-0.65, armCenterY, 0]}
           args={[0.3, armHeight, 0.3]}
-          color={colorArms}
+          color={shirt_color}
         />
         <Box
           position={[0.65, armCenterY, 0]}
           args={[0.3, armHeight, 0.3]}
-          color={colorArms}
+          color={shirt_color}
         />
-
         <group ref={headRef} position={[0, headCenterY, 0]}>
           <Box
             position={[0, 0, 0]}
             args={[headSize, headSize, headSize]}
-            color={colorHead}
+            color={skin_color}
           />
-
+          {/* Hair */}
+          {hair_style === "long" && (
+            <group position={[0, 0.25, -0.1]}>
+              {/* back */}
+              <Box
+                scale={[1, 1.1, 1]}
+                position={[0, -0.2, -0.15]}
+                args={[0.8, 0.8, 0.3]}
+                color={hair_color}
+              />
+              {/* sides */}
+              <Box
+                position={[-0.35, -0.2, 0]}
+                args={[0.2, 0.6, 0.2]}
+                color={hair_color}
+              />
+              <Box
+                position={[0.35, -0.2, 0]}
+                args={[0.2, 0.6, 0.2]}
+                color={hair_color}
+              />
+              {/* Top */}
+              <Box
+                position={[0, 0.2, 0.1]}
+                args={[0.7, 0.2, 0.7]}
+                color={hair_color}
+              />
+            </group>
+          )}
           {/* Eyes */}
           {[
             [-eyeOffsetX, "left"],
@@ -628,10 +680,16 @@ export const Character = forwardRef(function Character(
                 position={[0, -0.015, 0.005]}
               >
                 <circleGeometry args={[eyeSize * 1.2, 16, 0, Math.PI]} />
-                <meshStandardMaterial color={colorHead} />
+                <meshStandardMaterial color={skin_color} />
               </mesh>
             </group>
           ))}
+          {/* Render the MouthViseme only if viseme_data and audioTime are provided */}
+          <MouthViseme
+            visemeData={params.viseme_data}
+            audioTime={params.audioTime}
+            size={[0.5, 0.3]}
+          />
         </group>
       </group>
     </group>

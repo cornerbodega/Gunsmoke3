@@ -1,12 +1,13 @@
+// components/CameraController.jsx
 import { useThree, useFrame } from "@react-three/fiber";
 import { useEffect, useRef, useMemo } from "react";
-
 import * as THREE from "three";
 
 export default function CameraController({ activePreset }) {
   const { camera } = useThree();
   const cameraTarget = useRef(new THREE.Vector3());
 
+  // Updated camera presets with new bailiff_reaction and added clerk_view
   const cameraPresets = useMemo(
     () => ({
       wide_establishing: {
@@ -34,6 +35,12 @@ export default function CameraController({ activePreset }) {
         lookAt: new THREE.Vector3(4.5, 2.5, -0.5),
       },
       bailiff_reaction: {
+        // New bailiff location near the witness
+        position: new THREE.Vector3(-8, 3, 0),
+        lookAt: new THREE.Vector3(-11, 2.5, -15),
+      },
+      clerk_view: {
+        // Clerk now occupies the former bailiff position
         position: new THREE.Vector3(9, 3, -6),
         lookAt: new THREE.Vector3(8, 2.5, -12),
       },
@@ -57,7 +64,6 @@ export default function CameraController({ activePreset }) {
       if (e.key.toLowerCase() === "c") {
         current.current = (current.current + 1) % presetNames.length;
         console.log("📷 Manual camera angle:", presetNames[current.current]);
-        // Optional: trigger override mode here
       }
     };
     window.addEventListener("keydown", handleKey);
@@ -68,9 +74,8 @@ export default function CameraController({ activePreset }) {
     const target =
       cameraPresets[presetNames[current.current]] ||
       cameraPresets["wide_establishing"];
-    camera.position.lerp(target.position, 0.05);
-    cameraTarget.current.lerp(target.lookAt, 0.05);
-    camera.lookAt(cameraTarget.current);
+    camera.position.copy(target.position); // Instant jump to new position
+    camera.lookAt(target.lookAt); // Instant jump to new lookAt
   });
 
   return null;

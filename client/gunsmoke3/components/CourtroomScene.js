@@ -1,8 +1,15 @@
 // components/CourtroomScene.jsx
-
+import { ClerkBox } from "@/components/CourtroomPrimatives";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { OrbitControls, Environment } from "@react-three/drei";
-import React, { Suspense, useEffect, useRef, useState } from "react";
+import React, {
+  Suspense,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+  useMemo,
+} from "react";
 import * as THREE from "three";
 import CameraController from "@/components/CameraController";
 import { getSupabase } from "@/utils/supabase";
@@ -23,13 +30,14 @@ import {
   StenographerStation,
   JuryBox,
   CeilingLight,
-  Character,
+  Character, // make sure this Character includes your MouthViseme rendering
 } from "@/components/CourtroomPrimatives";
-import { loadGetInitialProps } from "next/dist/shared/lib/utils";
 
 export default function CourtroomScene({ lines, sceneId }) {
   const [currentIndex, setCurrentIndex] = useState(-1);
   const [activeSpeakerId, setActiveSpeakerId] = useState(null);
+  // New state to track the audio's current time for viseme timing.
+  const [currentAudioTime, setCurrentAudioTime] = useState(0);
   const characterRefs = useRef({});
   const audioMap = useRef({});
   // Shared lookTargetRef for non‑speakers
@@ -37,9 +45,8 @@ export default function CourtroomScene({ lines, sceneId }) {
   // A separate ref for the active speaker’s target (the person the speaker should look at)
   const speakerTargetRef = useRef(new THREE.Object3D());
   const [ready, setReady] = useState(false);
-  const judgeRef = useRef();
-  const witnessRef = useRef();
   const [headRefsReady, setHeadRefsReady] = useState(false);
+  const [autoPlay, setAutoPlay] = useState(false);
 
   // --- Audio Setup ---
   useEffect(() => {
@@ -54,23 +61,38 @@ export default function CourtroomScene({ lines, sceneId }) {
   // --- Key Handler for Next Line ---
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (!headRefsReady) return;
-      if (e.key !== "Enter") return;
-      const nextIndex = currentIndex + 1;
-      const line = lines[nextIndex];
-      if (!line) return;
-      const audio = audioMap.current[line.line_id];
-      if (audio) {
-        audio.currentTime = 0;
-        audio.play();
+      if (!headRefsReady || e.key !== "Enter") return;
+      if (currentIndex === -1) {
+        setAutoPlay(true); // trigger auto-play
+        setCurrentIndex(0); // start from first line
+        const firstLine = lines[0];
+        const audio = audioMap.current[firstLine.line_id];
+        if (audio) {
+          audio.currentTime = 0;
+          audio.play();
+          setActiveSpeakerId(firstLine.line_obj.role);
+        }
       }
-      setCurrentIndex(nextIndex);
-      setActiveSpeakerId(line.line_obj.role);
-      console.log(`Active Speaker ID: ${line.line_obj.role}`);
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [currentIndex, lines, headRefsReady]);
+
+  // --- Update currentAudioTime using the active audio element ---
+  useEffect(() => {
+    if (currentIndex === -1) return;
+    const currentLine = lines[currentIndex];
+    const audio = audioMap.current[currentLine.line_id];
+    if (!audio) return;
+
+    const updateTime = () => {
+      setCurrentAudioTime(audio.currentTime);
+    };
+    audio.addEventListener("timeupdate", updateTime);
+    return () => {
+      audio.removeEventListener("timeupdate", updateTime);
+    };
+  }, [currentIndex, lines]);
 
   // --- One-Time Update on New Line ---
   useEffect(() => {
@@ -89,10 +111,6 @@ export default function CourtroomScene({ lines, sceneId }) {
     } else {
       console.warn(`Speaker head not found for id: ${speakerId}`);
     }
-    console.log(
-      `characterRefs.current for ${speakerId}:`,
-      characterRefs.current
-    );
 
     if (targetId && characterRefs.current[targetId]?.headRef) {
       targetHead = characterRefs.current[targetId].headRef;
@@ -110,8 +128,6 @@ export default function CourtroomScene({ lines, sceneId }) {
     }
     // Update shared lookTargetRef (for non‑speakers) to the speaker’s head position.
     if (speakerHead) {
-      console.log(`Speaker ${speakerId} found. speakerHead:`, speakerHead);
-
       const pos = new THREE.Vector3();
       speakerHead.getWorldPosition(pos);
       lookTargetRef.current.position.copy(pos);
@@ -127,8 +143,6 @@ export default function CourtroomScene({ lines, sceneId }) {
       console.log(
         `Speaker ${speakerId} has no valid target. Falling back to judge.`
       );
-
-      // Fallback: use judge's head.
       if (characterRefs.current["judge"]?.headRef) {
         const pos3 = new THREE.Vector3();
         characterRefs.current["judge"].headRef.getWorldPosition(pos3);
@@ -138,31 +152,52 @@ export default function CourtroomScene({ lines, sceneId }) {
       }
     }
   }, [currentIndex, lines]);
+  useEffect(() => {
+    if (!autoPlay || currentIndex === -1) return;
+
+    const currentLine = lines[currentIndex];
+    const audio = audioMap.current[currentLine.line_id];
+    const pauseBefore = currentLine.line_obj.pause_before ?? 0.5;
+
+    if (!audio) return;
+
+    const handleAudioEnd = () => {
+      if (currentIndex < lines.length - 1) {
+        setTimeout(() => {
+          const nextIndex = currentIndex + 1;
+          const nextLine = lines[nextIndex];
+          const nextAudio = audioMap.current[nextLine.line_id];
+          if (nextAudio) {
+            nextAudio.currentTime = 0;
+            nextAudio.play();
+          }
+          setCurrentIndex(nextIndex);
+          setActiveSpeakerId(nextLine.line_obj.role);
+        }, pauseBefore * 1000);
+      }
+    };
+
+    audio.addEventListener("ended", handleAudioEnd);
+
+    return () => {
+      audio.removeEventListener("ended", handleAudioEnd);
+    };
+  }, [autoPlay, currentIndex, lines]);
 
   // --- Continuously Update Targets (inside Canvas) ---
   function TargetUpdater() {
     useFrame(() => {
       if (currentIndex === -1) return;
       const currentLine = lines[currentIndex]?.line_obj;
-
       if (!currentLine) return;
       const speakerId = currentLine.character_id;
       const targetId = currentLine.eye_target;
       const speakerObj = characterRefs.current[speakerId];
-      // Update shared lookTargetRef to speaker’s current head position.
-      // console.log(
-      //   `Updating targets... ${speakerId} ${targetId} ${JSON.stringify(
-      //     speakerObj
-      //   )}`
-      // );
       if (speakerObj && speakerObj.headRef) {
-        console.log(`"123`);
         const pos = new THREE.Vector3();
         speakerObj.headRef.getWorldPosition(pos);
         lookTargetRef.current.position.copy(pos);
       }
-      // Update active speaker’s target.
-      // If the targetId lookup fails, fall back to judge.
       const targetObj =
         (targetId && characterRefs.current[targetId]) ||
         characterRefs.current["judge"];
@@ -203,7 +238,7 @@ export default function CourtroomScene({ lines, sceneId }) {
       targetHead.getWorldPosition(pos);
       pos.y += 0.25;
       lookTargetRef.current.position.copy(pos);
-      console.log("👀 Defaulting lookTarget to prosecutor1");
+      // console.log("👀 Defaulting lookTarget to prosecutor1");
     }
   }, [currentIndex, headRefsReady]);
 
@@ -226,34 +261,34 @@ export default function CourtroomScene({ lines, sceneId }) {
     defense_table_left: { position: [3.5, -0.05, -0.5], rotation: [0, 0, 0] },
     cross_examination_well: {
       position: [-10.5, -0.05, -8.5],
-      rotation: [0, Math.PI, 0],
+      rotation: [0, Math.PI / 1.2, 0],
     },
+    clerk_box: { position: [10, 1, -15], rotation: [0, Math.PI, 0] },
   };
 
   const getLocationPose = (key) =>
     zoneMap[key] || { position: [0, 0, 0], rotation: [0, 0, 0] };
 
   // --- Main Characters ---
-  // IMPORTANT: The unique id must match the names used in your line data.
+  // In CourtroomScene.jsx, update the mainCharacters array to add the clerk:
   const mainCharacters = [
     {
       id: "judge",
       zone: "judge_bench",
-      // ref: judgeRef,
       role: "judge",
       sitting: true,
       colorTorso: "#222",
       emotion: "angry",
     },
     {
-      id: "prosecutor1", // active speaker in some lines
+      id: "prosecutor1",
       zone: "cross_examination_well",
       role: "prosecutor1",
       sitting: false,
       colorTorso: "#1e90ff",
     },
     {
-      id: "defendant", // active speaker in some lines
+      id: "defendant",
       zone: "prosecutor_table_right",
       role: "prosecutor2",
       sitting: true,
@@ -276,7 +311,6 @@ export default function CourtroomScene({ lines, sceneId }) {
     {
       id: "witness",
       zone: "witness_stand",
-      // ref: witnessRef,
       role: "witness",
       sitting: true,
       colorTorso: "#ffd700",
@@ -288,7 +322,103 @@ export default function CourtroomScene({ lines, sceneId }) {
       sitting: true,
       colorTorso: "#9932cc",
     },
+    {
+      id: "clerk", // New clerk character added here
+      zone: "clerk_box", // Uses the new clerk_box zone
+      role: "clerk",
+      sitting: true,
+      colorTorso: "#a0522d", // Sienna color (adjust as desired)
+    },
   ];
+
+  // Get the current active line, if any.
+  const currentLine = currentIndex !== -1 ? lines[currentIndex].line_obj : null;
+  // Build a mapping of character id to their specified style
+  const characterStyleMapping = useMemo(() => {
+    const mapping = {};
+    lines.forEach(({ line_obj }) => {
+      const { role, style } = line_obj;
+      if (role && style && !mapping[role]) {
+        mapping[role] = style;
+      }
+    });
+    console.log("✅ Final style mapping from DB:", mapping);
+    return mapping;
+  }, [lines]);
+
+  // Helper: Given a character id, return the style from the lines if available,
+  // or generate a unique default that is consistent across renders.
+  const getStyleForCharacter = (id, role) => {
+    const key = role || id;
+
+    // Use DB style if available
+    if (characterStyleMapping[key]) {
+      console.log(`🎨 Using style from DB for key "${key}"`);
+      return characterStyleMapping[key];
+    }
+
+    // Sensible defaults for specific roles
+    const presetStyles = {
+      judge: {
+        hair_color: "#2e2e2e",
+        hair_style: "short",
+        skin_color: "#c68642",
+        pants_color: "#000000",
+        shirt_color: "#222222", // black robe
+      },
+      jury: {
+        hair_color: "#4b4b4b",
+        hair_style: "short",
+        skin_color: "#e1b7a1",
+        pants_color: "#2e2e2e",
+        shirt_color: "#8b4513", // brown tones
+      },
+      bailiff: {
+        hair_color: "#000000",
+        hair_style: "buzz",
+        skin_color: "#8d5524",
+        pants_color: "#00008b", // navy blue
+        shirt_color: "#2f4f4f", // dark slate gray
+      },
+      clerk: {
+        hair_color: "#a0522d",
+        hair_style: "bun",
+        skin_color: "#f5cba7",
+        pants_color: "#2e2e2e",
+        shirt_color: "#f0e68c",
+      },
+    };
+
+    if (presetStyles[key]) {
+      console.log(`🧑‍⚖️ Using preset style for "${key}"`);
+      return presetStyles[key];
+    }
+
+    // Fallback if nothing is set
+    const fallbackStyle = generateDeterministicStyle(id);
+    console.log(`✨ Generated fallback style for "${id}":`, fallbackStyle);
+    return fallbackStyle;
+  };
+
+  const generateDeterministicStyle = (id) => {
+    const palette = {
+      hairStyles: ["short", "long", "braids", "bun", "buzz"],
+      skinTones: ["#f5cba7", "#e1b7a1", "#c68642", "#8d5524", "#ffdbac"],
+      pantsColors: ["#000000", "#2e2e2e", "#4b4b4b", "#5a3e36"],
+      shirtColors: ["#ffffff", "#d3d3d3", "#4682b4", "#32cd32", "#ff69b4"],
+      hairColors: ["#2e2e2e", "#4b4b4b", "#8b4513", "#a0522d", "#000000"], // realistic shades
+    };
+
+    const hash = [...id].reduce((acc, char) => acc + char.charCodeAt(0), 0);
+
+    return {
+      hair_color: palette.hairColors[hash % palette.hairColors.length],
+      hair_style: palette.hairStyles[hash % palette.hairStyles.length],
+      skin_color: palette.skinTones[hash % palette.skinTones.length],
+      pants_color: palette.pantsColors[(hash + 1) % palette.pantsColors.length],
+      shirt_color: palette.shirtColors[(hash + 2) % palette.shirtColors.length],
+    };
+  };
 
   return (
     <div style={{ width: "100vw", height: "100vh" }}>
@@ -303,10 +433,13 @@ export default function CourtroomScene({ lines, sceneId }) {
         }}
       >
         <Suspense fallback={null}>
-          <CameraController />
-          {/* Shared lookTarget for non‑speakers */}
+          <CameraController
+            activePreset={
+              (currentIndex !== -1 && lines[currentIndex]?.line_obj.camera) ||
+              "wide_establishing"
+            }
+          />
           <primitive object={lookTargetRef.current} />
-          {/* Continuously update target positions */}
           <TargetUpdater
             currentIndex={currentIndex}
             lines={lines}
@@ -314,7 +447,6 @@ export default function CourtroomScene({ lines, sceneId }) {
             lookTargetRef={lookTargetRef}
             speakerTargetRef={speakerTargetRef}
           />
-          {/* Lighting */}
           <hemisphereLight intensity={0.1} />
           <hemisphereLight skyColor="white" groundColor="#444" intensity={0} />
           <directionalLight
@@ -361,10 +493,9 @@ export default function CourtroomScene({ lines, sceneId }) {
           {/* Furniture */}
           <JudgeTable />
           <WitnessStand />
+          <ClerkBox />
           <LawyerTable position={[5, 0, -1.75]} />
           <LawyerTable position={[-5, 0, -1.75]} />
-
-          {/* Seating */}
           {[...[-3.5, -6.5, 3.5, 6.5]].map((x) => (
             <SingleChair key={x} position={[x, 0, -0.5]} />
           ))}
@@ -377,25 +508,29 @@ export default function CourtroomScene({ lines, sceneId }) {
           {/* Characters */}
           {ready && (
             <>
-              {mainCharacters.map(({ id, zone, ref, role, ...rest }) => (
-                <Character
-                  key={id}
-                  ref={ref}
-                  {...getLocationPose(zone)}
-                  onReady={(headRef) => registerCharacter(id, headRef, role)}
-                  params={{
-                    ...rest,
-                    role,
-                    // For non‑speakers
-                    eyeTargetRef: lookTargetRef,
-                    // For the active speaker
-                    activeSpeakerId,
-                    speakerTargetRef,
-                    characterId: id,
-                  }}
-                />
-              ))}
-              {/* Register jury characters so they can be valid targets */}
+              {mainCharacters.map(({ id, zone, ref, role, ...rest }) => {
+                const isActive = currentLine && currentLine.role === role;
+                return (
+                  <Character
+                    key={id}
+                    ref={ref}
+                    {...getLocationPose(zone)}
+                    onReady={(headRef) => registerCharacter(id, headRef, role)}
+                    params={{
+                      ...rest,
+                      role,
+                      style: getStyleForCharacter(id, role),
+                      eyeTargetRef: lookTargetRef,
+                      activeSpeakerId,
+                      speakerTargetRef,
+                      characterId: id,
+                      // Pass viseme data and currentAudioTime to the active speaker.
+                      viseme_data: isActive ? currentLine.viseme_data : null,
+                      audioTime: isActive ? currentAudioTime : 0,
+                    }}
+                  />
+                );
+              })}
               {[...Array(6)].map((_, i) => (
                 <Character
                   key={`jury-${i}`}
@@ -411,6 +546,7 @@ export default function CourtroomScene({ lines, sceneId }) {
                     activeSpeakerId,
                     speakerTargetRef,
                     characterId: `jury-${i}`,
+                    style: getStyleForCharacter(`jury-${i}`, "jury"),
                   }}
                 />
               ))}
@@ -420,14 +556,12 @@ export default function CourtroomScene({ lines, sceneId }) {
           {/* Bailiff */}
           <group scale={[1.3, 1.3, 1.3]}>
             <Character
-              position={[8, 0, -12]}
+              position={[-12, 0, -12]}
               rotation={[0, 0, 0]}
               params={{
                 sitting: false,
                 torsoLean: -0.1,
-                colorTorso: "#2f4f4f",
-                colorArms: "#2f4f4f",
-                colorLegs: "#00008b",
+                style: getStyleForCharacter("bailiff", "bailiff"),
                 eyeTargetRef: lookTargetRef,
                 activeSpeakerId,
                 speakerTargetRef,
@@ -435,6 +569,7 @@ export default function CourtroomScene({ lines, sceneId }) {
               }}
             />
           </group>
+
           {[5, 8, 11, 14].flatMap((z) =>
             [-12, -7.5, -3.5, 3.5, 7.5, 12].map((x, i) => {
               const skip = [
@@ -458,6 +593,10 @@ export default function CourtroomScene({ lines, sceneId }) {
                     activeSpeakerId,
                     speakerTargetRef,
                     characterId: `audience-${x}-${z}`,
+                    style: getStyleForCharacter(
+                      `audience-${x}-${z}`,
+                      "audience"
+                    ),
                   }}
                 />
               );
@@ -474,4 +613,19 @@ export default function CourtroomScene({ lines, sceneId }) {
       </Canvas>
     </div>
   );
+}
+
+function hashStringToColor(str) {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = str.charCodeAt(i) + ((hash << 5) - hash);
+  }
+
+  let color = "#";
+  for (let i = 0; i < 3; i++) {
+    const value = (hash >> (i * 8)) & 0xff;
+    color += ("00" + value.toString(16)).slice(-2);
+  }
+
+  return color;
 }
