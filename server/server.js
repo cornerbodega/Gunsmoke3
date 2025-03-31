@@ -14,6 +14,7 @@ const cors = require("cors");
 const fs = require("fs");
 const OpenAI = require("openai");
 const speakerVoiceMap = new Map();
+const ffmpeg = require("fluent-ffmpeg");
 
 const textToSpeech = require("@google-cloud/text-to-speech");
 const client = new textToSpeech.TextToSpeechClient();
@@ -321,7 +322,7 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
     }
     async function generateSceneMetadata({ text, speaker, previousLineJson }) {
       const prompt = `
-      You're helping animate courtroom scenes. Given a character's current line of dialog and the full metadata of the previous line, return updated metadata for the current line in the following JSON format using the exact value options if specified:
+      You're helping animate courtroom scenes. Given a character's current line of dialog and the full metadata of the previous line, return updated metadata for the current line in the following JSON format using the exact value options if specified. Do not create new values or change the numbers. Lawyer roles can be shared across characters.
       
       {
         "posture": "sitting" or "standing",
@@ -329,8 +330,8 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
         "zone": "judge_bench" or "witness_stand" or "prosecutor_table_left" or "prosecutor_table_right" or "defense_table_left" or "defense_table_right" or "cross_examination_well",
         "camera": "wide_establishing" or "crossExaminationFromWell" or "judge_closeup" or "witness_closeup" or "prosecutor_table" or "defense_table" or "bailiff_reaction" or "wide_view_from_jury",
         "role": "judge" or "witness" or "prosecutor1" or "prosecutor2" or "defense1" or "defendant" or "jury"
-        "eye_target": "judge" or "witness" or "prosecutor1" or "prosecutor2"" or "defense" or "defendant" or "jury",
-        "pause_before": "choose a number with respect to previous line for cinematic timing",
+        "eye_target": "judge" or "witness" or "prosecutor1" or "prosecutor2"" or "defense1" or "defendant" or "jury",
+        "pause_before": "choose a number with respect to previous line for cinematic timing. 0.5 is a good default.",
       }
       
       Use the prior metadata to keep scene continuity but adapt based on the new dialog. DO NOT wrap your response in markdown or explanation — just return the raw JSON only.
@@ -800,11 +801,11 @@ async function generateCharacterStyles(sceneId) {
 
 async function getStyleForCharacter(character_id) {
   const example = {
-    hair_color: "#2f2f2f",
+    hair_color: "#hex code",
     hair_style: 'choose either "long" or "bald"',
-    skin_color: "#d2a67a",
-    shirt_color: "#0047AB",
-    pants_color: "#1a1a1a",
+    skin_color: "#hex code",
+    shirt_color: "#hex code",
+    pants_color: "#hex code",
   };
 
   const prompt = `
@@ -814,7 +815,7 @@ Return JSON only in this format:
 
 ${JSON.stringify(example, null, 2)}
 
-Only use hex codes for colors. Choose appropriate combinations for professional courtroom attire.
+Only use hex codes for colors. Elizabeth holmes is famously blonde and wears all black for example. Choose appropriate combinations for professional courtroom attire.
 Do NOT wrap your response in markdown.
 Character ID: ${character_id}
 `;
@@ -846,6 +847,78 @@ Character ID: ${character_id}
     }; // fallback
   }
 }
+app.get("/audio-proxy", async (req, res) => {
+  const { url } = req.query;
+  if (!url) return res.status(400).send("Missing URL");
+
+  try {
+    const decodedUrl = decodeURIComponent(url);
+
+    // Optional: whitelist only your GCS bucket
+    const allowedHost = "storage.googleapis.com";
+    const parsed = new URL(decodedUrl);
+    if (!parsed.hostname.endsWith(allowedHost)) {
+      return res.status(403).send("Forbidden: Invalid host");
+    }
+
+    const response = await fetch(decodedUrl);
+
+    if (!response.ok) {
+      return res.status(response.status).send("Upstream fetch failed");
+    }
+
+    // Set proper headers for CORS and content-type
+    res.setHeader(
+      "Content-Type",
+      response.headers.get("content-type") || "audio/mpeg"
+    );
+    res.setHeader(
+      "Content-Length",
+      response.headers.get("content-length") || "0"
+    );
+    res.setHeader("Access-Control-Allow-Origin", "*");
+
+    const reader = response.body.getReader();
+
+    const pump = async () => {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        res.write(value);
+      }
+      res.end();
+    };
+
+    await pump();
+  } catch (err) {
+    console.error("Proxy error:", err);
+    res.status(500).send("Proxy failed");
+  }
+});
+
+app.post("/convert", upload.single("video"), (req, res) => {
+  const inputPath = req.file.path;
+  const outputPath = `${inputPath}.mp4`;
+
+  ffmpeg(inputPath)
+    .output(outputPath)
+    .videoCodec("libx264")
+    .audioCodec("aac")
+    .on("end", () => {
+      res.download(outputPath, "scene.mp4", (err) => {
+        // Clean up temp files
+        fs.unlinkSync(inputPath);
+        fs.unlinkSync(outputPath);
+        if (err) console.error("Download error:", err);
+      });
+    })
+    .on("error", (err) => {
+      console.error("FFmpeg error:", err);
+      fs.unlinkSync(inputPath);
+      res.status(500).send("Conversion failed");
+    })
+    .run();
+});
 
 app.listen(port, () => {
   console.log(`✅ PDF parser server running on http://localhost:${port}`);

@@ -36,40 +36,162 @@ import {
 export default function CourtroomScene({ lines, sceneId }) {
   const [currentIndex, setCurrentIndex] = useState(-1);
   const [activeSpeakerId, setActiveSpeakerId] = useState(null);
-  // New state to track the audio's current time for viseme timing.
+  // State to track the audio's current time for viseme timing.
   const [currentAudioTime, setCurrentAudioTime] = useState(0);
   const characterRefs = useRef({});
   const audioMap = useRef({});
-  // Shared lookTargetRef for non‑speakers
+  // Shared lookTargetRef for non‑speakers and active speaker target
   const lookTargetRef = useRef(new THREE.Object3D());
-  // A separate ref for the active speaker’s target (the person the speaker should look at)
   const speakerTargetRef = useRef(new THREE.Object3D());
   const [ready, setReady] = useState(false);
   const [headRefsReady, setHeadRefsReady] = useState(false);
   const [autoPlay, setAutoPlay] = useState(false);
 
+  // --- Recording Setup Refs ---
+  const canvasRef = useRef(null);
+  const mediaRecorder = useRef(null);
+  const recordedChunks = useRef([]);
+  const audioContextRef = useRef(null);
+  const audioDestRef = useRef(null);
+
+  // Initialize AudioContext and a destination node for recording audio.
+  useEffect(() => {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    audioContextRef.current = new AudioContext();
+    audioDestRef.current =
+      audioContextRef.current.createMediaStreamDestination();
+  }, []);
+
   // --- Audio Setup ---
   useEffect(() => {
     const map = {};
-    lines.forEach(({ line_id, line_obj }) => {
-      const audio = new Audio(line_obj.audio_url.trim());
-      map[line_id] = audio;
-    });
-    audioMap.current = map;
+    const loadAllAudio = async () => {
+      for (const { line_id, line_obj } of lines) {
+        const gcsUrl = line_obj.audio_url.trim();
+        const proxiedUrl = `/api/audio-proxy?url=${encodeURIComponent(gcsUrl)}`;
+        const audio = new Audio(proxiedUrl);
+        audio.crossOrigin = "anonymous";
+        audio.preload = "auto";
+
+        try {
+          // Wait for the metadata to load
+          await new Promise((resolve, reject) => {
+            audio.addEventListener("canplaythrough", resolve, { once: true });
+            audio.addEventListener("error", reject, { once: true });
+          });
+
+          // Only connect after it's ready
+          if (audioContextRef.current && audioDestRef.current) {
+            const source =
+              audioContextRef.current.createMediaElementSource(audio);
+            source.connect(audioContextRef.current.destination);
+            source.connect(audioDestRef.current);
+          }
+
+          map[line_id] = audio;
+        } catch (err) {
+          console.error(`❌ Error loading audio for line ${line_id}:`, err);
+        }
+      }
+
+      audioMap.current = map;
+    };
+
+    loadAllAudio();
   }, [lines]);
 
-  // --- Key Handler for Next Line ---
+  // --- Start Recording Function ---
+  const startRecording = () => {
+    if (!canvasRef.current || !audioDestRef.current) return;
+    // Capture the canvas at 60 fps (ensure preserveDrawingBuffer is enabled)
+    const canvasStream = canvasRef.current.captureStream(60);
+    // Get the audio stream from our MediaStreamDestination.
+    const audioStream = audioDestRef.current.stream;
+    // Combine video and audio tracks.
+    const combinedStream = new MediaStream([
+      ...canvasStream.getTracks(),
+      ...audioStream.getTracks(),
+    ]);
+    mediaRecorder.current = new MediaRecorder(combinedStream, {
+      mimeType: "video/webm; codecs=vp9",
+    });
+    mediaRecorder.current.ondataavailable = (event) => {
+      if (event.data.size > 0) {
+        recordedChunks.current.push(event.data);
+      }
+    };
+    mediaRecorder.current.onstop = () => {
+      const blob = new Blob(recordedChunks.current, { type: "video/webm" });
+      const formData = new FormData();
+      formData.append("video", blob, "scene.webm");
+
+      fetch("http://localhost:3001/convert", {
+        method: "POST",
+        body: formData,
+      })
+        .then(async (res) => {
+          const blob = await res.blob();
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement("a");
+          link.href = url;
+          link.download = "scene.mp4";
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          URL.revokeObjectURL(url);
+          console.log("✅ MP4 downloaded");
+        })
+        .catch((err) => {
+          console.error("❌ Upload or conversion failed:", err);
+        });
+    };
+
+    mediaRecorder.current.start();
+    console.log("Recording started.");
+  };
+
+  // --- Key Handler for Next Line & Start Recording on Enter ---
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (!headRefsReady || e.key !== "Enter") return;
+      console.log("Enter key pressed. headRefsReady:", headRefsReady);
       if (currentIndex === -1) {
         setAutoPlay(true); // trigger auto-play
-        setCurrentIndex(0); // start from first line
+        setCurrentIndex(0); // start from the first line
+
+        // Start recording on first Enter press.
+        if (
+          audioContextRef.current &&
+          audioContextRef.current.state === "suspended"
+        ) {
+          audioContextRef.current.resume();
+        }
+        startRecording();
+
         const firstLine = lines[0];
         const audio = audioMap.current[firstLine.line_id];
         if (audio) {
+          audio.preload = "auto";
+          audio.load();
+          audio.addEventListener("playing", () =>
+            console.log("Audio playing for line:", firstLine.line_id)
+          );
+          audio.addEventListener("ended", () =>
+            console.log("Audio ended for line:", firstLine.line_id)
+          );
+          audio.addEventListener("error", (err) =>
+            console.error("Audio error for line:", firstLine.line_id, err)
+          );
           audio.currentTime = 0;
-          audio.play();
+          audio
+            .play()
+            .catch((err) =>
+              console.error(
+                "Error playing audio for line:",
+                firstLine.line_id,
+                err
+              )
+            );
           setActiveSpeakerId(firstLine.line_obj.role);
         }
       }
@@ -84,7 +206,6 @@ export default function CourtroomScene({ lines, sceneId }) {
     const currentLine = lines[currentIndex];
     const audio = audioMap.current[currentLine.line_id];
     if (!audio) return;
-
     const updateTime = () => {
       setCurrentAudioTime(audio.currentTime);
     };
@@ -99,8 +220,7 @@ export default function CourtroomScene({ lines, sceneId }) {
     if (currentIndex === -1) return;
     const currentLine = lines[currentIndex]?.line_obj;
     const speakerId = currentLine?.role;
-    const targetId = currentLine?.eye_target; // get the ref of this name
-
+    const targetId = currentLine?.eye_target;
     console.log(
       `New active speaker: ${speakerId}, intended target: ${targetId}`
     );
@@ -111,28 +231,27 @@ export default function CourtroomScene({ lines, sceneId }) {
     } else {
       console.warn(`Speaker head not found for id: ${speakerId}`);
     }
-
     if (targetId && characterRefs.current[targetId]?.headRef) {
       targetHead = characterRefs.current[targetId].headRef;
     } else {
       console.warn(`Target head not found for id: ${targetId}`);
     }
-    // Prevent self-looking (if speaker and target are the same)
+    // Prevent self-looking.
     if (speakerId === targetId) {
       console.warn(
-        `Speaker ${speakerId} has a target equal to themselves. Using fallback.`
+        `Speaker ${speakerId} is targeting themselves. Using fallback.`
       );
       targetHead = currentLine.eye_target
         ? characterRefs.current[currentLine.eye_target]?.headRef
         : null;
     }
-    // Update shared lookTargetRef (for non‑speakers) to the speaker’s head position.
+    // Update shared look target for non‑speakers.
     if (speakerHead) {
       const pos = new THREE.Vector3();
       speakerHead.getWorldPosition(pos);
       lookTargetRef.current.position.copy(pos);
     }
-    // For the active speaker, update speakerTargetRef to the target head’s world position.
+    // Update speaker target for the active speaker.
     if (speakerHead && targetHead) {
       const pos2 = new THREE.Vector3();
       targetHead.getWorldPosition(pos2);
@@ -152,16 +271,17 @@ export default function CourtroomScene({ lines, sceneId }) {
       }
     }
   }, [currentIndex, lines]);
+
+  // --- Auto-Play Progression & Stop Recording on Last Line ---
   useEffect(() => {
     if (!autoPlay || currentIndex === -1) return;
-
     const currentLine = lines[currentIndex];
     const audio = audioMap.current[currentLine.line_id];
     const pauseBefore = currentLine.line_obj.pause_before ?? 0.5;
-
     if (!audio) return;
 
     const handleAudioEnd = () => {
+      console.log("Audio ended for line:", currentLine.line_id);
       if (currentIndex < lines.length - 1) {
         setTimeout(() => {
           const nextIndex = currentIndex + 1;
@@ -169,16 +289,33 @@ export default function CourtroomScene({ lines, sceneId }) {
           const nextAudio = audioMap.current[nextLine.line_id];
           if (nextAudio) {
             nextAudio.currentTime = 0;
-            nextAudio.play();
+            nextAudio.load();
+            nextAudio
+              .play()
+              .catch((err) =>
+                console.error(
+                  "Error playing next audio for line:",
+                  nextLine.line_id,
+                  err
+                )
+              );
           }
           setCurrentIndex(nextIndex);
           setActiveSpeakerId(nextLine.line_obj.role);
         }, pauseBefore * 1000);
+      } else {
+        // Final line finished – stop the recording.
+        if (
+          mediaRecorder.current &&
+          mediaRecorder.current.state === "recording"
+        ) {
+          mediaRecorder.current.stop();
+          console.log("Recording stopped after final line.");
+        }
       }
     };
 
     audio.addEventListener("ended", handleAudioEnd);
-
     return () => {
       audio.removeEventListener("ended", handleAudioEnd);
     };
@@ -238,7 +375,6 @@ export default function CourtroomScene({ lines, sceneId }) {
       targetHead.getWorldPosition(pos);
       pos.y += 0.25;
       lookTargetRef.current.position.copy(pos);
-      // console.log("👀 Defaulting lookTarget to prosecutor1");
     }
   }, [currentIndex, headRefsReady]);
 
@@ -270,7 +406,6 @@ export default function CourtroomScene({ lines, sceneId }) {
     zoneMap[key] || { position: [0, 0, 0], rotation: [0, 0, 0] };
 
   // --- Main Characters ---
-  // In CourtroomScene.jsx, update the mainCharacters array to add the clerk:
   const mainCharacters = [
     {
       id: "judge",
@@ -323,17 +458,17 @@ export default function CourtroomScene({ lines, sceneId }) {
       colorTorso: "#9932cc",
     },
     {
-      id: "clerk", // New clerk character added here
-      zone: "clerk_box", // Uses the new clerk_box zone
+      id: "clerk", // New clerk character
+      zone: "clerk_box",
       role: "clerk",
       sitting: true,
-      colorTorso: "#a0522d", // Sienna color (adjust as desired)
+      colorTorso: "#a0522d",
     },
   ];
 
   // Get the current active line, if any.
   const currentLine = currentIndex !== -1 ? lines[currentIndex].line_obj : null;
-  // Build a mapping of character id to their specified style
+  // Build mapping of character id to their specified style.
   const characterStyleMapping = useMemo(() => {
     const mapping = {};
     lines.forEach(({ line_obj }) => {
@@ -346,57 +481,45 @@ export default function CourtroomScene({ lines, sceneId }) {
     return mapping;
   }, [lines]);
 
-  // Helper: Given a character id, return the style from the lines if available,
-  // or generate a unique default that is consistent across renders.
   const getStyleForCharacter = (id, role) => {
     const key = role || id;
-
-    // Use DB style if available
     if (characterStyleMapping[key]) {
-      console.log(`🎨 Using style from DB for key "${key}"`);
       return characterStyleMapping[key];
     }
-
-    // Sensible defaults for specific roles
     const presetStyles = {
       judge: {
         hair_color: "#2e2e2e",
-        hair_style: "short",
+        hair_style: "bald",
         skin_color: "#c68642",
         pants_color: "#000000",
-        shirt_color: "#222222", // black robe
+        shirt_color: "#222222",
       },
       jury: {
         hair_color: "#4b4b4b",
-        hair_style: "short",
+        hair_style: "bald",
         skin_color: "#e1b7a1",
         pants_color: "#2e2e2e",
-        shirt_color: "#8b4513", // brown tones
+        shirt_color: "#8b4513",
       },
       bailiff: {
         hair_color: "#000000",
-        hair_style: "buzz",
+        hair_style: "bald",
         skin_color: "#8d5524",
-        pants_color: "#00008b", // navy blue
-        shirt_color: "#2f4f4f", // dark slate gray
+        pants_color: "#00008b",
+        shirt_color: "#2f4f4f",
       },
       clerk: {
         hair_color: "#a0522d",
-        hair_style: "bun",
+        hair_style: "bald",
         skin_color: "#f5cba7",
         pants_color: "#2e2e2e",
         shirt_color: "#f0e68c",
       },
     };
-
     if (presetStyles[key]) {
-      console.log(`🧑‍⚖️ Using preset style for "${key}"`);
       return presetStyles[key];
     }
-
-    // Fallback if nothing is set
     const fallbackStyle = generateDeterministicStyle(id);
-    console.log(`✨ Generated fallback style for "${id}":`, fallbackStyle);
     return fallbackStyle;
   };
 
@@ -406,11 +529,9 @@ export default function CourtroomScene({ lines, sceneId }) {
       skinTones: ["#f5cba7", "#e1b7a1", "#c68642", "#8d5524", "#ffdbac"],
       pantsColors: ["#000000", "#2e2e2e", "#4b4b4b", "#5a3e36"],
       shirtColors: ["#ffffff", "#d3d3d3", "#4682b4", "#32cd32", "#ff69b4"],
-      hairColors: ["#2e2e2e", "#4b4b4b", "#8b4513", "#a0522d", "#000000"], // realistic shades
+      hairColors: ["#2e2e2e", "#4b4b4b", "#8b4513", "#a0522d", "#000000"],
     };
-
     const hash = [...id].reduce((acc, char) => acc + char.charCodeAt(0), 0);
-
     return {
       hair_color: palette.hairColors[hash % palette.hairColors.length],
       hair_style: palette.hairStyles[hash % palette.hairStyles.length],
@@ -423,10 +544,12 @@ export default function CourtroomScene({ lines, sceneId }) {
   return (
     <div style={{ width: "100vw", height: "100vh" }}>
       <Canvas
+        ref={canvasRef}
         shadows
         camera={{ position: [0, 25, 19], fov: 45 }}
         style={{ background: "#222" }}
         gl={{
+          preserveDrawingBuffer: true,
           outputEncoding: THREE.sRGBEncoding,
           toneMapping: THREE.ACESFilmicToneMapping,
           toneMappingExposure: 1,
@@ -524,7 +647,6 @@ export default function CourtroomScene({ lines, sceneId }) {
                       activeSpeakerId,
                       speakerTargetRef,
                       characterId: id,
-                      // Pass viseme data and currentAudioTime to the active speaker.
                       viseme_data: isActive ? currentLine.viseme_data : null,
                       audioTime: isActive ? currentAudioTime : 0,
                     }}
@@ -546,7 +668,7 @@ export default function CourtroomScene({ lines, sceneId }) {
                     activeSpeakerId,
                     speakerTargetRef,
                     characterId: `jury-${i}`,
-                    style: getStyleForCharacter(`jury-${i}`, "jury"),
+                    style: getStyleForCharacter(`jury-${i}`),
                   }}
                 />
               ))}
@@ -620,12 +742,10 @@ function hashStringToColor(str) {
   for (let i = 0; i < str.length; i++) {
     hash = str.charCodeAt(i) + ((hash << 5) - hash);
   }
-
   let color = "#";
   for (let i = 0; i < 3; i++) {
     const value = (hash >> (i * 8)) & 0xff;
     color += ("00" + value.toString(16)).slice(-2);
   }
-
   return color;
 }
