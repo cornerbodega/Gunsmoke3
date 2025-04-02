@@ -11,6 +11,7 @@ import { Cylinder } from "@react-three/drei";
 import * as THREE from "three";
 import { TextureLoader } from "three";
 import MouthViseme from "@/components/MouthViseme";
+import Nameplate from "@/components/Nameplate";
 // Reusable box mesh
 export function Box({ position, rotation, args, color = "#5b3b1d", ...props }) {
   return (
@@ -565,6 +566,9 @@ export const Character = forwardRef(function Character(
     torsoLean = 0,
     style = {},
     emotion = "neutral",
+    characterId,
+    role,
+    activeSpeakerId,
   } = params;
 
   const {
@@ -689,6 +693,12 @@ export const Character = forwardRef(function Character(
             visemeData={params.viseme_data}
             audioTime={params.audioTime}
             size={[0.5, 0.3]}
+          />
+          <Nameplate
+            position={[0, headCenterY / 2, 0]}
+            role={role}
+            id={characterId}
+            isSpeaking={activeSpeakerId === characterId}
           />
         </group>
       </group>

@@ -117,9 +117,11 @@ const phonemeToViseme = {
   sil: "rest",
 };
 
-const MAX_CHUNKS = 1;
+const MAX_CHUNKS = 4;
 
-function splitTextByChars(text, maxChars = 7000, overlap = 500) {
+const textChunkSize = 7000;
+
+function splitTextByChars(text, maxChars = textChunkSize, overlap = 500) {
   const chunks = [];
   let i = 0;
   while (i < text.length) {
@@ -143,7 +145,7 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
     fs.unlinkSync(filePath);
     console.log("📄 PDF parsed successfully");
 
-    const chunks = splitTextByChars(parsed.text, 7000, 500);
+    const chunks = splitTextByChars(parsed.text, textChunkSize, 500);
     const limit = Math.min(MAX_CHUNKS, chunks.length);
     console.log(`🔢 Processing ${limit} of ${chunks.length} chunks`);
 
@@ -153,7 +155,7 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
     const speakerMap = new Map(); // id => { name, role, label, voice }
 
     for (let i = 0; i < limit; i++) {
-      const detected = await extractCharactersFromChunk(chunks[i]);
+      const detected = await extractCharactersFromChunk(chunks[i], speakerMap);
       for (const char of detected) {
         if (!speakerMap.has(char.id)) {
           speakerMap.set(char.id, {
@@ -210,13 +212,14 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
     }
 
     // 🧵 AI-powered de-overlap
-    const finalTranscript = await removeOverlapWithAI(
+    const finalTranscript = await removeOverlapIteratively(
       processedChunks.map((c) => c.cleanedText)
     );
     const lines = finalTranscript.split("\n").filter(Boolean);
     const sceneId = crypto.randomUUID(); // or whatever UUID you generate
 
-    let previousLine = null;
+    const CONTEXT_WINDOW = 10;
+    let previousLines = [];
 
     for (let i = 0; i < lines.length; i++) {
       const match = lines[i].match(/^(.+?):\s*(.+)$/);
@@ -229,14 +232,13 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
         lineIndex: i,
         speaker,
         text,
-        previousLine,
+        previousLines, // Pass the sliding window of previous lines
       });
       const speakerId = normalizeSpeakerId(speaker);
       const speakerInfo = speakerMap.get(speakerId);
       if (!speakerInfo) {
         console.warn(`⚠️ Unknown speaker encountered: ${speaker}`);
       }
-
       function normalizeSpeakerId(name) {
         return name
           .trim()
@@ -245,7 +247,7 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
       }
 
       const lineObj = {
-        character_id: normalizeSpeakerId(speaker),
+        character_id: speakerId,
         text,
         posture: metadata.posture,
         emotion: metadata.emotion,
@@ -255,23 +257,30 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
         pause_before: metadata.pause_before,
         audio_url: metadata.audio_url,
         viseme_data: metadata.viseme_data,
-        role: speakerInfo?.role || "unknown",
+        role:
+          metadata.zone === "witness_at_witness_stand" &&
+          speakerInfo?.role === "defendant"
+            ? "witness"
+            : speakerInfo?.role || "unknown",
       };
 
-      // Save to Supabase
+      // Save the line to Supabase (unchanged)
       const lineData = {
         scene_id: sceneId,
         line_id: i + 1,
         line_obj: lineObj,
       };
-      const savedLineData = await saveToSupabase("gs3_lines", lineData).catch(
-        (error) =>
-          console.error(`❌ Error saving line ${i + 1}:`, error.message)
+      await saveToSupabase("gs3_lines", lineData).catch((error) =>
+        console.error(`❌ Error saving line ${i + 1}:`, error.message)
       );
       console.log("gs3_lines", lineData);
       console.log(`✅ Line ${i + 1} saved to Supabase`);
 
-      previousLine = lineObj;
+      // Update previousLines sliding window: add the current line and remove the oldest if needed
+      previousLines.push(lineObj);
+      if (previousLines.length > CONTEXT_WINDOW) {
+        previousLines.shift();
+      }
     }
 
     async function generateMetadataForLine({
@@ -279,36 +288,17 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
       lineIndex,
       speaker,
       text,
-      previousLine, // <-- pass this from the loop
+      previousLines,
     }) {
-      const speakerId = speaker.toLowerCase().replace(/\s+/g, "");
-      const speakerInfo = speakerMap.get(speakerId);
-      const voiceName = speakerInfo?.voice || assignVoiceForSpeaker(speakerId);
-      // let voiceName;
-      //   if (!speakerVoiceMap.has(speaker)) {
-      //     voiceName = assignVoiceForSpeaker(speaker);
-      //     speakerVoiceMap.set(speaker, voiceName);
-      //   } else {
-      //     voiceName = speakerVoiceMap.get(speaker);
-      //   }
-      // Works!!
-      //   const audioUrl = await generateTTS({
-      //     text,
-      //     speaker,
-      //     voiceName,
-      //     sceneId,
-      //     lineIndex,
-      //   });
-
       const metadata = await generateSceneMetadata({
         text,
         speaker,
-        previousLineJson: previousLine || {}, // if null, pass empty object
+        previousLines, // Pass the entire sliding window for context
       });
 
       return {
         ...metadata,
-        audio_url: "audioUrl", // replace with actual URL
+        audio_url: "audioUrl", // placeholder; your audio logic remains the same
         viseme_data: {
           duration: 2.3,
           frames: [
@@ -320,32 +310,45 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
         },
       };
     }
-    async function generateSceneMetadata({ text, speaker, previousLineJson }) {
+
+    async function generateSceneMetadata({ text, speaker, previousLines }) {
       const prompt = `
       You're helping animate courtroom scenes. Given a character's current line of dialog and the full metadata of the previous line, return updated metadata for the current line in the following JSON format using the exact value options if specified. Do not create new values or change the numbers. Lawyer roles can be shared across characters.
       
       {
         "posture": "sitting" or "standing",
         "emotion": "neutral" or "tense" or "confident" or "nervous" or "defensive",
-        "zone": "judge_bench" or "witness_stand" or "prosecutor_table_left" or "prosecutor_table_right" or "defense_table_left" or "defense_table_right" or "cross_examination_well",
-        "camera": "wide_establishing" or "crossExaminationFromWell" or "judge_closeup" or "witness_closeup" or "prosecutor_table" or "defense_table" or "bailiff_reaction" or "wide_view_from_jury",
-        "role": "judge" or "witness" or "prosecutor1" or "prosecutor2" or "defense1" or "defendant" or "jury"
+        "role": "witness" or "prosecutor1" or "prosecutor2" or "defense1" or "defendant" (if seated at defendant seat, witness if at the witness stand),
         "eye_target": "judge" or "witness" or "prosecutor1" or "prosecutor2"" or "defense1" or "defendant" or "jury",
         "pause_before": "choose a number with respect to previous line for cinematic timing. 0.5 is a good default.",
       }
-      
+      Note that each character can only go in a zone that they are allowed in starting with their role name. Only the witness can be in the witness stand. 
       Use the prior metadata to keep scene continuity but adapt based on the new dialog. DO NOT wrap your response in markdown or explanation — just return the raw JSON only.
+      Defense team all have zone of defense_table_left.
       
       Current speaker: ${speaker}
       Current line: "${text}"
-      
-      Previous line object:
-      ${JSON.stringify(previousLineJson, null, 2)}
-      `;
 
+      Previous Lines:
+      ${JSON.stringify(
+        previousLines.map((p) => {
+          return {
+            character_id: p.character_id,
+            text: p.text,
+            posture: p.posture,
+            emotion: p.emotion,
+          };
+        }),
+        null,
+        2
+      )}
+
+
+      `;
+      console.log("\n📤 Sending scene metadata prompt to OpenAI:\n", prompt);
       try {
         const response = await openai.chat.completions.create({
-          model: "gpt-4o",
+          model: "gpt-4o-mini",
           messages: [{ role: "system", content: prompt }],
         });
 
@@ -372,6 +375,17 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
     console.log("✅ All lines saved. Starting audio generation...");
     await generateAudioAndVisemes(sceneId);
     await generateCharacterStyles(sceneId);
+    await assignZones(sceneId);
+    // Build the knownCharacters array from speakerMap
+    const knownCharacters = Array.from(speakerMap.values()).map((char) => ({
+      name: char.name,
+      character_id:
+        char.id || char.name.toLowerCase().replace(/[^a-z0-9]/g, ""),
+    }));
+
+    // Call the batch assignment function
+    await assignCharactersBatch(sceneId, knownCharacters);
+
     const sceneMetadata = {
       scene_id: sceneId,
       scene_name:
@@ -405,6 +419,209 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
     res.status(500).json({ error: "Failed to parse PDF" });
   }
 });
+
+async function assignCharactersBatch(sceneId, knownCharacters, batchSize = 10) {
+  try {
+    // Fetch all lines for the scene from Supabase
+    const { data: rows, error } = await supabase
+      .from("gs3_lines")
+      .select("line_id, line_obj")
+      .eq("scene_id", sceneId)
+      .order("line_id", { ascending: true });
+
+    if (error) throw new Error(error.message);
+
+    // Process lines in batches
+    for (let i = 0; i < rows.length; i += batchSize) {
+      const batch = rows.slice(i, i + batchSize);
+
+      // Construct a prompt with the batch of lines
+      const prompt = `
+You are analyzing a courtroom transcript and need to determine the correct character for each line of dialogue. You will receive a list of lines, each with a unique line ID and the text spoken by the character. Your task is to assign the correct character to each line based on the context of the dialogue. The existing character IDs are not necessarily correct, so you need to analyze the text and assign the correct character.
+Use the following list of known characters to select the appropriate character for each line.
+Each character is represented by a name and a normalized ID (lowercase with no spaces or punctuation).
+
+Known characters:
+${JSON.stringify(knownCharacters, null, 2)}
+
+For each of the following transcript lines, return an array of JSON objects with the following keys:
+- "line_id": (number) the line's unique identifier,
+- "name": (string) the character's full name,
+- "character_id": (string) the normalized ID.
+
+Transcript lines:
+${batch
+  .map(
+    (row) =>
+      `Line ID ${row.line_id}: "${row.line_obj.text.replace(/"/g, '\\"')}"`
+  )
+  .join("\n")}
+
+Return only the JSON array.
+      `.trim();
+
+      // Request the LLM for the batch assignment
+      const response = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [{ role: "system", content: prompt }],
+      });
+
+      let content = response.choices[0].message.content.trim();
+      content = content
+        .replace(/^```(?:json)?\s*/i, "")
+        .replace(/```$/, "")
+        .trim();
+
+      let assignments;
+      try {
+        assignments = JSON.parse(content);
+      } catch (parseErr) {
+        console.error(
+          "Error parsing batch assignment JSON:",
+          parseErr,
+          content
+        );
+        continue;
+      }
+
+      // Update each line with the assigned character from the batch response
+      for (const assignment of assignments) {
+        const { line_id, name, character_id } = assignment;
+
+        // Find the matching line in the batch (for logging or additional logic)
+        const lineData = batch.find((r) => r.line_id === line_id);
+        if (!lineData) {
+          console.warn(`No matching line found for line_id ${line_id}`);
+          continue;
+        }
+
+        const updatedLineObj = {
+          ...lineData.line_obj,
+          assigned_character: { name, character_id },
+        };
+
+        const { error: updateErr } = await supabase
+          .from("gs3_lines")
+          .update({ line_obj: updatedLineObj })
+          .eq("scene_id", sceneId)
+          .eq("line_id", line_id);
+
+        if (updateErr) {
+          console.error(
+            `❌ Failed to update character for line ${line_id}:`,
+            updateErr.message
+          );
+        } else {
+          console.log(
+            `✅ Updated character for line ${line_id}: ${name} (${character_id})`
+          );
+        }
+      }
+    }
+  } catch (err) {
+    console.error("🚨 Error during batch character assignment:", err.message);
+  }
+}
+
+async function assignZones(sceneId) {
+  try {
+    const { data: rows, error } = await supabase
+      .from("gs3_lines")
+      .select("line_id, line_obj")
+      .eq("scene_id", sceneId)
+      .order("line_id", { ascending: true });
+
+    if (error) throw new Error(error.message);
+
+    const CONTEXT_WINDOW = 15;
+    const priorLines = [];
+
+    for (const row of rows) {
+      const { line_id, line_obj } = row;
+      const { character_id, role, text } = line_obj;
+
+      const prompt = `
+You are assigning spatial zones and camera angles in a courtroom animation based on dialogue context.
+
+Rules:
+- The **witness** must always be in "witness_at_witness_stand".
+- **Defense** roles should only be in "defense_table_left" or "defense_table_right".
+- **Prosecutors** must be in "prosecutor_table_left", "prosecutor_table_right", or "prosecutor_at_witness_stand".
+- Do not invent new zones. Choose the most contextually accurate location based on previous line zones and speaker roles.
+Camera angles:
+- Choose a shot: "wide_establishing" or "crossExaminationFromWell" or "judge_closeup" or "witness_closeup" or "prosecutor_table" or "defense_table" or "bailiff_reaction" or "wide_view_from_jury",
+
+Return JSON only in this format:
+{
+  "zone": "...",
+  camera": "...",
+}
+
+Current line:
+{
+  "character_id": "${character_id}",
+  "role": "${role}",
+  "text": "${text}"
+}
+
+Prior lines:
+${JSON.stringify(
+  priorLines.map((l) => ({
+    character_id: l.character_id,
+    role: l.role,
+    text: l.text,
+    zone: l.zone,
+    camera: l.camera,
+  })),
+  null,
+  2
+)}
+`.trim();
+
+      const response = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [{ role: "system", content: prompt }],
+      });
+
+      const content = response.choices[0].message.content.trim();
+      const json = content
+        .replace(/^```(?:json)?/, "")
+        .replace(/```$/, "")
+        .trim();
+
+      const { zone, camera } = JSON.parse(json);
+
+      const updatedLineObj = {
+        ...line_obj,
+        zone,
+        camera,
+      };
+
+      const { error: updateErr } = await supabase
+        .from("gs3_lines")
+        .update({ line_obj: updatedLineObj })
+        .eq("scene_id", sceneId)
+        .eq("line_id", line_id);
+
+      if (updateErr) {
+        console.error(
+          `❌ Failed to update zone for line ${line_id}:`,
+          updateErr.message
+        );
+      } else {
+        console.log(`🗺️ Assigned zone for line ${line_id}: ${zone}`);
+      }
+
+      // Update sliding context
+      priorLines.push({ character_id, role, text, zone });
+      if (priorLines.length > CONTEXT_WINDOW) priorLines.shift();
+    }
+
+    console.log("✅ All zones assigned.");
+  } catch (err) {
+    console.error("🚨 assignZones error:", err.message);
+  }
+}
 
 async function uploadToGCS(
   buffer,
@@ -529,14 +746,14 @@ async function generateAudioAndVisemes(sceneId) {
   }
 }
 
-async function extractCharactersFromChunk(chunkText) {
+async function extractCharactersFromChunk(chunkText, speakerMap) {
   try {
     const prompt = `
     The following is text from a courtroom transcript. Extract all **unique speakers**, and return their:
     
     - Full name
     - Speaker label (e.g., "Q", "A", "THE COURT")
-    - Role (judge, witness, defense, prosecutor, jury, bailiff, etc.)
+    - Role (one of these: judge, witness, defense1, defense2, prosecutor1, prosecutor2, defendant)
     - A normalized ID (lowercase, no spaces or punctuation — used for database keys)
     
     Return an array like:
@@ -570,7 +787,12 @@ async function extractCharactersFromChunk(chunkText) {
       model: "gpt-4o-mini",
       messages: [
         { role: "system", content: prompt },
-        { role: "user", content: slicedInput },
+        {
+          role: "user",
+          content: `Input: ${slicedInput}.\n\n Characters so far: ${JSON.stringify(
+            speakerMap
+          )}`,
+        },
       ],
     });
 
@@ -608,9 +830,9 @@ async function cleanText(chunkText, speakerMap, lastSpeaker, lastLine) {
       Array.from(speakerMap.values()).map((s) => {
         return { name: s.name, role: s.role, label: s.speaker_label };
       })
-    )}. Return dialog only, in the format "Speaker Name: line". Do not explain or summarize. 
+    )}. Return dialog only, in the format "Speaker Name: line". Do not explain or summarize. Omit narration or non-dialog text. 
       
-      ⚠️ If the transcript includes any redaction codes (such as (b)(6), (b)(7)(C), or similar), replace them with "[REDACTED]". Ensure redacted portions are cleanly replaced and do not break sentence structure.`;
+      ⚠️ If the transcript includes any redaction codes (such as (b)(6), (b)(7)(C), or similar), replace them with "Redacted". Ensure redacted portions are cleanly replaced and do not break sentence structure.`;
 
     const sampleInput = `version, how many tests could it run 18 at that time in 2010? 19 A I don't know exactly what the number was...`;
     const sampleOutput = `Jessica Chan: Version, how many tests could it run at that time in 2010?\nElizabeth Holmes: I don't know exactly what the number was...`;
@@ -648,32 +870,29 @@ async function cleanText(chunkText, speakerMap, lastSpeaker, lastLine) {
   }
 }
 
-async function removeOverlapWithAI(cleanedChunks) {
-  try {
-    const combined = cleanedChunks.join("\n\n<<<CHUNK_BREAK>>>\n\n");
-
+async function removeOverlapIteratively(cleanedChunks) {
+  if (cleanedChunks.length === 0) return "";
+  let mergedTranscript = cleanedChunks[0];
+  for (let i = 1; i < cleanedChunks.length; i++) {
     const prompt = `
-This is a transcript created in overlapping chunks. Some lines are repeated or slightly duplicated due to chunk overlap. Please return a clean version of this transcript with repeated or overlapping lines removed.
+Below are two consecutive transcript segments with some overlapping dialog.
+Remove duplicate or repeated lines and merge them into one clean transcript.
 
-Keep the dialog format intact: "Speaker Name: line". Do not summarize. Do not explain.
+Segment 1:
+${mergedTranscript}
+
+Segment 2:
+${cleanedChunks[i]}
+
+Return only the merged transcript in the "Speaker Name: line" format.
 `;
-
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
-      messages: [
-        { role: "system", content: prompt },
-        { role: "user", content: combined.slice(0, 12000) }, // token limit buffer
-      ],
+      messages: [{ role: "system", content: prompt }],
     });
-
-    return response.choices[0].message.content.trim();
-  } catch (error) {
-    console.error(
-      "AI overlap-removal error:",
-      error.response?.data || error.message
-    );
-    return cleanedChunks.join("\n\n"); // fallback to naive concat
+    mergedTranscript = response.choices[0].message.content.trim();
   }
+  return mergedTranscript;
 }
 
 const availableVoices = [

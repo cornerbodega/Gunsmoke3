@@ -20,38 +20,111 @@ export default function CreateScene() {
     if (res.ok) {
       const combinedText = data.cleanedChunks.join("<<<CHUNK_BREAK>>>");
       setPdfText(combinedText);
-      setFullTranscript(data.transcript || ""); // 🧵 Set full combined transcript
+      setFullTranscript(data.transcript || "");
     }
+
     console.log("data");
     console.log(data);
   };
 
   return (
-    <div className="p-4 space-y-6">
-      <h1 className="text-2xl font-bold">Create Scene</h1>
+    <div
+      style={{
+        padding: "60px 30px",
+        maxWidth: "900px",
+        margin: "0 auto",
+        backgroundColor: "#0f0f0f",
+        color: "#fff",
+        fontFamily: "system-ui, sans-serif",
+      }}
+    >
+      <h1 style={{ fontSize: "2rem", fontWeight: 700, marginBottom: "30px" }}>
+        Create Scene
+      </h1>
 
-      <input type="file" accept="application/pdf" onChange={handleFileUpload} />
+      <input
+        type="file"
+        accept="application/pdf"
+        onChange={handleFileUpload}
+        style={{
+          marginBottom: "40px",
+          padding: "10px",
+          border: "1px solid #444",
+          borderRadius: "6px",
+          backgroundColor: "#1a1a1a",
+          color: "#ddd",
+          cursor: "pointer",
+        }}
+      />
 
       {fullTranscript && (
-        <div className="p-4 border rounded bg-white shadow max-h-[400px] overflow-auto">
-          <h2 className="text-xl font-semibold mb-2">
+        <div
+          style={{
+            backgroundColor: "#1a1a1a",
+            padding: "20px",
+            borderRadius: "10px",
+            border: "1px solid #333",
+            marginBottom: "40px",
+            maxHeight: "400px",
+            overflowY: "auto",
+          }}
+        >
+          <h2
+            style={{
+              fontSize: "1.2rem",
+              fontWeight: 600,
+              marginBottom: "12px",
+              color: "#4EA1F3",
+            }}
+          >
             🧵 Full Combined Transcript
           </h2>
-          <pre className="whitespace-pre-wrap text-sm text-gray-800">
+          <pre
+            style={{
+              whiteSpace: "pre-wrap",
+              fontSize: "0.9rem",
+              lineHeight: 1.6,
+              color: "#ccc",
+            }}
+          >
             {fullTranscript}
           </pre>
         </div>
       )}
 
       {pdfText && (
-        <div className="space-y-6 max-h-[500px] overflow-auto">
+        <div style={{ maxHeight: "500px", overflowY: "auto" }}>
           {pdfText.split("<<<CHUNK_BREAK>>>").map((chunk, i) => (
             <div
               key={i}
-              className="whitespace-pre-wrap border p-4 rounded bg-gray-100"
+              style={{
+                marginBottom: "30px",
+                padding: "20px",
+                backgroundColor: "#191919",
+                border: "1px solid #333",
+                borderRadius: "10px",
+              }}
             >
-              <strong>Chunk {i + 1}</strong>
-              <div className="mt-2">{chunk}</div>
+              <p
+                style={{
+                  fontWeight: 600,
+                  fontSize: "1rem",
+                  marginBottom: "10px",
+                  color: "#88ccff",
+                }}
+              >
+                Chunk {i + 1}
+              </p>
+              <div
+                style={{
+                  whiteSpace: "pre-wrap",
+                  fontSize: "0.95rem",
+                  lineHeight: 1.6,
+                  color: "#ddd",
+                }}
+              >
+                {chunk}
+              </div>
             </div>
           ))}
         </div>

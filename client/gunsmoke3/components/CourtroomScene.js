@@ -61,12 +61,21 @@ export default function CourtroomScene({ lines, sceneId }) {
     audioDestRef.current =
       audioContextRef.current.createMediaStreamDestination();
   }, []);
+  const [audioReady, setAudioReady] = useState(false); // ⬅️ Add this
 
-  // --- Audio Setup ---
+  // --- Load a rolling window of 10 audio files
   useEffect(() => {
-    const map = {};
-    const loadAllAudio = async () => {
-      for (const { line_id, line_obj } of lines) {
+    if (!lines?.length) return;
+
+    // Determine the starting index for our rolling window.
+    const startIndex = currentIndex === -1 ? 0 : currentIndex;
+    const windowLines = lines.slice(startIndex, startIndex + 10);
+
+    const loadWindowAudio = async () => {
+      for (const { line_id, line_obj } of windowLines) {
+        // Skip if audio for this line is already loaded.
+        if (audioMap.current[line_id]) continue;
+
         const gcsUrl = line_obj.audio_url.trim();
         const proxiedUrl = `/api/audio-proxy?url=${encodeURIComponent(gcsUrl)}`;
         const audio = new Audio(proxiedUrl);
@@ -74,13 +83,11 @@ export default function CourtroomScene({ lines, sceneId }) {
         audio.preload = "auto";
 
         try {
-          // Wait for the metadata to load
           await new Promise((resolve, reject) => {
             audio.addEventListener("canplaythrough", resolve, { once: true });
             audio.addEventListener("error", reject, { once: true });
           });
 
-          // Only connect after it's ready
           if (audioContextRef.current && audioDestRef.current) {
             const source =
               audioContextRef.current.createMediaElementSource(audio);
@@ -88,17 +95,22 @@ export default function CourtroomScene({ lines, sceneId }) {
             source.connect(audioDestRef.current);
           }
 
-          map[line_id] = audio;
+          audioMap.current[line_id] = audio;
         } catch (err) {
           console.error(`❌ Error loading audio for line ${line_id}:`, err);
         }
       }
-
-      audioMap.current = map;
+      // For the initial load, mark audioReady as true once the window is loaded.
+      if (!audioReady && windowLines.length > 0) {
+        console.log(
+          "✅ Finished loading initial audio window. Setting audioReady = true"
+        );
+        setAudioReady(true);
+      }
     };
 
-    loadAllAudio();
-  }, [lines]);
+    loadWindowAudio();
+  }, [lines, currentIndex, audioReady]);
 
   // --- Start Recording Function ---
   const startRecording = () => {
@@ -153,7 +165,14 @@ export default function CourtroomScene({ lines, sceneId }) {
   // --- Key Handler for Next Line & Start Recording on Enter ---
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (!headRefsReady || e.key !== "Enter") return;
+      console.log("↩️ Enter key pressed");
+      console.log("audioReady:", audioReady);
+      console.log("headRefsReady:", headRefsReady);
+      console.log("currentIndex:", currentIndex);
+      console.log("audioMap keys:", Object.keys(audioMap.current));
+
+      if (!headRefsReady || !audioReady || e.key !== "Enter")
+        return console.log(`❌ Not ready to start recording`); // ⬅️ Check if audio is ready
       console.log("Enter key pressed. headRefsReady:", headRefsReady);
       if (currentIndex === -1) {
         setAutoPlay(true); // trigger auto-play
@@ -192,13 +211,14 @@ export default function CourtroomScene({ lines, sceneId }) {
                 err
               )
             );
-          setActiveSpeakerId(firstLine.line_obj.role);
+          // setActiveSpeakerId(firstLine.line_obj.role);
+          setActiveSpeakerId(firstLine.line_obj.character_id); // ✅ use character_id
         }
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [currentIndex, lines, headRefsReady]);
+  }, [currentIndex, lines, headRefsReady, audioReady, audioMap]);
 
   // --- Update currentAudioTime using the active audio element ---
   useEffect(() => {
@@ -276,10 +296,13 @@ export default function CourtroomScene({ lines, sceneId }) {
   useEffect(() => {
     if (!autoPlay || currentIndex === -1) return;
     const currentLine = lines[currentIndex];
+    console.log(`Auto-playing line: ${currentLine.line_id}`);
+    console.log(`audioMap.current:`, audioMap.current);
+
     const audio = audioMap.current[currentLine.line_id];
     const pauseBefore = currentLine.line_obj.pause_before ?? 0.5;
-    if (!audio) return;
-
+    if (!audio)
+      return console.log(`Audio not found for line: ${currentLine.line_id}`);
     const handleAudioEnd = () => {
       console.log("Audio ended for line:", currentLine.line_id);
       if (currentIndex < lines.length - 1) {
@@ -299,9 +322,16 @@ export default function CourtroomScene({ lines, sceneId }) {
                   err
                 )
               );
+            console.log(`Playing next audio: ${nextLine.line_id}`);
+          } else {
+            console.warn(`Next audio not found for line: ${nextLine.line_id}`);
           }
           setCurrentIndex(nextIndex);
-          setActiveSpeakerId(nextLine.line_obj.role);
+          console.log(`Moving to next line: ${nextLine.line_id}`);
+
+          // setActiveSpeakerId(nextLine.line_obj.role);
+          setCurrentIndex(nextIndex);
+          setActiveSpeakerId(nextLine.line_obj.character_id); // this was the missing piece
         }, pauseBefore * 1000);
       } else {
         // Final line finished – stop the recording.
@@ -379,8 +409,14 @@ export default function CourtroomScene({ lines, sceneId }) {
   }, [currentIndex, headRefsReady]);
 
   const zoneMap = {
-    judge_bench: { position: [0, 2, -18], rotation: [0, Math.PI, 0] },
-    witness_stand: { position: [-10, 1.1, -15], rotation: [0, Math.PI, 0] },
+    judge_sitting_at_judge_bench: {
+      position: [0, 2, -18],
+      rotation: [0, Math.PI, 0],
+    },
+    witness_at_witness_stand: {
+      position: [-10, 1.1, -15],
+      rotation: [0, Math.PI, 0],
+    },
     stenographer_station: {
       position: [-17.5, 0, -8],
       rotation: [0, -Math.PI / 2, 0],
@@ -393,10 +429,17 @@ export default function CourtroomScene({ lines, sceneId }) {
       position: [-6.5, -0.05, -0.5],
       rotation: [0, 0, 0],
     },
-    defense_table_right: { position: [6.5, -0.05, -0.5], rotation: [0, 0, 0] },
+    defense_table_right: {
+      position: [6.5, -0.05, -0.5],
+      rotation: [0, 0, 0],
+    },
     defense_table_left: { position: [3.5, -0.05, -0.5], rotation: [0, 0, 0] },
-    cross_examination_well: {
+    prosecutor_at_witness_stand: {
       position: [-10.5, -0.05, -8.5],
+      rotation: [0, Math.PI / 1.2, 0],
+    },
+    defense_lawyer_at_witness_stand: {
+      position: [-7.5, -0.05, -8.5],
       rotation: [0, Math.PI / 1.2, 0],
     },
     clerk_box: { position: [10, 1, -15], rotation: [0, Math.PI, 0] },
@@ -409,7 +452,7 @@ export default function CourtroomScene({ lines, sceneId }) {
   const mainCharacters = [
     {
       id: "judge",
-      zone: "judge_bench",
+      zone: "judge_sitting_at_judge_bench",
       role: "judge",
       sitting: true,
       colorTorso: "#222",
@@ -417,13 +460,13 @@ export default function CourtroomScene({ lines, sceneId }) {
     },
     {
       id: "prosecutor1",
-      zone: "cross_examination_well",
+      zone: "prosecutor_at_witness_stand",
       role: "prosecutor1",
       sitting: false,
       colorTorso: "#1e90ff",
     },
     {
-      id: "defendant",
+      id: "prosecutor2",
       zone: "prosecutor_table_right",
       role: "prosecutor2",
       sitting: true,
@@ -445,7 +488,7 @@ export default function CourtroomScene({ lines, sceneId }) {
     },
     {
       id: "witness",
-      zone: "witness_stand",
+      zone: "witness_at_witness_stand",
       role: "witness",
       sitting: true,
       colorTorso: "#ffd700",
@@ -477,7 +520,7 @@ export default function CourtroomScene({ lines, sceneId }) {
         mapping[role] = style;
       }
     });
-    console.log("✅ Final style mapping from DB:", mapping);
+    // console.log("✅ Final style mapping from DB:", mapping);
     return mapping;
   }, [lines]);
 
@@ -494,13 +537,13 @@ export default function CourtroomScene({ lines, sceneId }) {
         pants_color: "#000000",
         shirt_color: "#222222",
       },
-      jury: {
-        hair_color: "#4b4b4b",
-        hair_style: "bald",
-        skin_color: "#e1b7a1",
-        pants_color: "#2e2e2e",
-        shirt_color: "#8b4513",
-      },
+      // jury: {
+      //   hair_color: "#4b4b4b",
+      //   hair_style: "bald",
+      //   skin_color: "#e1b7a1",
+      //   pants_color: "#2e2e2e",
+      //   shirt_color: "#8b4513",
+      // },
       bailiff: {
         hair_color: "#000000",
         hair_style: "bald",
@@ -539,6 +582,50 @@ export default function CourtroomScene({ lines, sceneId }) {
       pants_color: palette.pantsColors[(hash + 1) % palette.pantsColors.length],
       shirt_color: palette.shirtColors[(hash + 2) % palette.shirtColors.length],
     };
+  };
+  const getZoneOccupancy = (lines, currentIndex) => {
+    const zoneOccupancy = {};
+    const characterZones = {};
+    const seenCharacters = new Set();
+
+    // Step 1: Simulate movements from the start to currentIndex
+    for (let i = 0; i <= currentIndex; i++) {
+      const { character_id, zone } = lines[i]?.line_obj || {};
+      if (!character_id || !zone) continue;
+
+      // Remove from any previous zone
+      for (const z in zoneOccupancy) {
+        if (zoneOccupancy[z] === character_id) {
+          zoneOccupancy[z] = null;
+        }
+      }
+
+      // Assign to new zone
+      zoneOccupancy[zone] = character_id;
+      characterZones[character_id] = zone;
+      seenCharacters.add(character_id);
+    }
+
+    // Step 2: Look ahead for characters we haven’t seen yet
+    for (let i = currentIndex + 1; i < lines.length; i++) {
+      const { character_id, zone } = lines[i]?.line_obj || {};
+      if (!character_id || !zone || seenCharacters.has(character_id)) continue;
+
+      // Assign this future character to their earliest known zone
+      if (!characterZones[character_id]) {
+        characterZones[character_id] = zone;
+      }
+
+      // Only assign if no one is occupying that zone yet
+      if (!Object.values(zoneOccupancy).includes(character_id)) {
+        zoneOccupancy[zone] ??= character_id;
+      }
+
+      seenCharacters.add(character_id);
+    }
+
+    // console.log(`🧭 Zone snapshot at line ${currentIndex}:`, zoneOccupancy);
+    return { zoneOccupancy, characterZones };
   };
 
   return (
@@ -629,101 +716,194 @@ export default function CourtroomScene({ lines, sceneId }) {
           <JuryBox position={[18, 0, -10]} rotation={[0, Math.PI / 2, 0]} />
 
           {/* Characters */}
-          {ready && (
-            <>
-              {mainCharacters.map(({ id, zone, ref, role, ...rest }) => {
-                const isActive = currentLine && currentLine.role === role;
+          <>
+            {ready && (
+              <>
+                {/* Dynamic Characters (Based on zoneOccupancy) */}
+                {(() => {
+                  const { zoneOccupancy, characterZones } = getZoneOccupancy(
+                    lines,
+                    currentIndex === -1 ? lines.length - 1 : currentIndex
+                  );
+                  // Force 'defense1' to be at 'defense_table_left' if not already present
+                  // if (!zoneOccupancy["defense_table_left"]) {
+                  //   zoneOccupancy["defense_table_left"] = "defense1";
+                  // }
+                  if (!zoneOccupancy["prosecutor_table_right"]) {
+                    zoneOccupancy["prosecutor_table_right"] = "prosecutor";
+                  }
+
+                  return Object.entries(zoneOccupancy).map(
+                    ([zone, characterId]) => {
+                      if (!characterId) return null;
+
+                      const lineData = lines.find(
+                        (l) => l.line_obj.character_id === characterId
+                      );
+                      const role = lineData?.line_obj?.role || characterId;
+                      const isActive =
+                        currentIndex !== -1 &&
+                        lines[currentIndex].line_obj.character_id ===
+                          characterId;
+
+                      return (
+                        <Character
+                          key={characterId}
+                          {...getLocationPose(zone)}
+                          onReady={(headRef) =>
+                            registerCharacter(characterId, headRef, role)
+                          }
+                          params={{
+                            sitting:
+                              zone.includes("table") ||
+                              zone === "witness_at_witness_stand",
+                            role,
+                            characterId,
+                            style: getStyleForCharacter(characterId, role),
+                            viseme_data: isActive
+                              ? lines[currentIndex].line_obj.viseme_data
+                              : null,
+                            audioTime: isActive ? currentAudioTime : 0,
+                            eyeTargetRef: lookTargetRef,
+                            speakerTargetRef,
+                            activeSpeakerId,
+                          }}
+                        />
+                      );
+                    }
+                  );
+                })()}
+
+                {/* Judge (always at bench) */}
+                <Character
+                  key="judge"
+                  {...getLocationPose("judge_sitting_at_judge_bench")}
+                  onReady={(headRef) =>
+                    registerCharacter("judge", headRef, "judge")
+                  }
+                  params={{
+                    sitting: true,
+                    role: "judge",
+                    characterId: "judge",
+                    style: getStyleForCharacter("judge", "judge"),
+                    eyeTargetRef: lookTargetRef,
+                    speakerTargetRef,
+                    activeSpeakerId,
+                  }}
+                />
+
+                {/* Clerk (always in clerk_box) */}
+                <Character
+                  key="clerk"
+                  {...getLocationPose("clerk_box")}
+                  onReady={(headRef) =>
+                    registerCharacter("clerk", headRef, "clerk")
+                  }
+                  params={{
+                    sitting: true,
+                    role: "clerk",
+                    characterId: "clerk",
+                    style: getStyleForCharacter("clerk", "clerk"),
+                    eyeTargetRef: lookTargetRef,
+                    speakerTargetRef,
+                    activeSpeakerId,
+                  }}
+                />
+
+                {/* Stenographer (always in stenographer_station) */}
+                <Character
+                  key="stenographer"
+                  {...getLocationPose("stenographer_station")}
+                  onReady={(headRef) =>
+                    registerCharacter("stenographer", headRef, "stenographer")
+                  }
+                  params={{
+                    sitting: true,
+                    role: "stenographer",
+                    characterId: "stenographer",
+                    style: getStyleForCharacter("stenographer", "stenographer"),
+                    eyeTargetRef: lookTargetRef,
+                    speakerTargetRef,
+                    activeSpeakerId,
+                  }}
+                />
+
+                {/* Jury (6 members fixed position) */}
+                {[...Array(6)].map((_, i) => (
+                  <Character
+                    key={`jury-${i}`}
+                    {...getLocationPose("jury_box")}
+                    position={[18, 0, -13 + i * 1.3]}
+                    rotation={[0, Math.PI / 2, 0]}
+                    onReady={(headRef) =>
+                      registerCharacter(`jury-${i}`, headRef, "jury")
+                    }
+                    params={{
+                      sitting: true,
+                      role: "jury",
+                      characterId: `jury-${i}`,
+                      style: getStyleForCharacter(`jury-${i}`, "jury"),
+                      eyeTargetRef: lookTargetRef,
+                      speakerTargetRef,
+                      activeSpeakerId,
+                    }}
+                  />
+                ))}
+              </>
+            )}
+
+            {/* Bailiff (static) */}
+            <group scale={[1.3, 1.3, 1.3]}>
+              <Character
+                position={[-12, 0, -12]}
+                rotation={[0, 0, 0]}
+                params={{
+                  sitting: false,
+                  torsoLean: -0.1,
+                  style: getStyleForCharacter("bailiff", "bailiff"),
+                  eyeTargetRef: lookTargetRef,
+                  activeSpeakerId,
+                  speakerTargetRef,
+                  characterId: "bailiff",
+                }}
+              />
+            </group>
+
+            {/* Audience */}
+            {[5, 8, 11, 14].flatMap((z) =>
+              [-12, -7.5, -3.5, 3.5, 7.5, 12].map((x, i) => {
+                const skip = [
+                  [-7.5, 5],
+                  [7.5, 8],
+                  [-3.5, 11],
+                  [12, 14],
+                ].some(([sx, sz]) => sx === x && sz === z);
+                if (skip) return null;
                 return (
                   <Character
-                    key={id}
-                    ref={ref}
-                    {...getLocationPose(zone)}
-                    onReady={(headRef) => registerCharacter(id, headRef, role)}
+                    key={`audience-${x}-${z}`}
+                    position={[x, 0, z]}
+                    rotation={[0, 0, 0]}
                     params={{
-                      ...rest,
-                      role,
-                      style: getStyleForCharacter(id, role),
+                      sitting: true,
+                      colorTorso: ["#b22222", "#4682b4", "#daa520", "#008b8b"][
+                        i % 4
+                      ],
                       eyeTargetRef: lookTargetRef,
                       activeSpeakerId,
                       speakerTargetRef,
-                      characterId: id,
-                      viseme_data: isActive ? currentLine.viseme_data : null,
-                      audioTime: isActive ? currentAudioTime : 0,
+                      role: "audience",
+                      characterId: `audience-${x}-${z}`,
+                      style: getStyleForCharacter(
+                        `audience-${x}-${z}`,
+                        "audience"
+                      ),
                     }}
                   />
                 );
-              })}
-              {[...Array(6)].map((_, i) => (
-                <Character
-                  key={`jury-${i}`}
-                  onReady={(headRef) =>
-                    registerCharacter(`jury-${i}`, headRef, "jury")
-                  }
-                  position={[18, 0, -13 + i * 1.3]}
-                  rotation={[0, Math.PI / 2, 0]}
-                  params={{
-                    sitting: true,
-                    colorTorso: "#8b4513",
-                    eyeTargetRef: lookTargetRef,
-                    activeSpeakerId,
-                    speakerTargetRef,
-                    characterId: `jury-${i}`,
-                    style: getStyleForCharacter(`jury-${i}`),
-                  }}
-                />
-              ))}
-            </>
-          )}
-
-          {/* Bailiff */}
-          <group scale={[1.3, 1.3, 1.3]}>
-            <Character
-              position={[-12, 0, -12]}
-              rotation={[0, 0, 0]}
-              params={{
-                sitting: false,
-                torsoLean: -0.1,
-                style: getStyleForCharacter("bailiff", "bailiff"),
-                eyeTargetRef: lookTargetRef,
-                activeSpeakerId,
-                speakerTargetRef,
-                characterId: "bailiff",
-              }}
-            />
-          </group>
-
-          {[5, 8, 11, 14].flatMap((z) =>
-            [-12, -7.5, -3.5, 3.5, 7.5, 12].map((x, i) => {
-              const skip = [
-                [-7.5, 5],
-                [7.5, 8],
-                [-3.5, 11],
-                [12, 14],
-              ].some(([sx, sz]) => sx === x && sz === z);
-              if (skip) return null;
-              return (
-                <Character
-                  key={`audience-${x}-${z}`}
-                  position={[x, 0, z]}
-                  rotation={[0, 0, 0]}
-                  params={{
-                    sitting: true,
-                    colorTorso: ["#b22222", "#4682b4", "#daa520", "#008b8b"][
-                      i % 4
-                    ],
-                    eyeTargetRef: lookTargetRef,
-                    activeSpeakerId,
-                    speakerTargetRef,
-                    characterId: `audience-${x}-${z}`,
-                    style: getStyleForCharacter(
-                      `audience-${x}-${z}`,
-                      "audience"
-                    ),
-                  }}
-                />
-              );
-            })
-          )}
+              })
+            )}
+          </>
 
           {/* Lights */}
           {[-10, 10].flatMap((x) =>
