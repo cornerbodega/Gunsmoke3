@@ -100,12 +100,31 @@ export default function CourtroomScene({ lines, sceneId }) {
           console.error(`❌ Error loading audio for line ${line_id}:`, err);
         }
       }
-      // For the initial load, mark audioReady as true once the window is loaded.
       if (!audioReady && windowLines.length > 0) {
         console.log(
           "✅ Finished loading initial audio window. Setting audioReady = true"
         );
-        setAudioReady(true);
+
+        // Play a test sound
+        const playTestSoundOnInteraction = () => {
+          console.log(`🔊 Playing test sound...`);
+
+          const testAudio = new Audio("/ready-sound.mp3");
+          testAudio
+            .play()
+            .then(() => {
+              console.log("✅ Test sound played after user interaction.");
+            })
+            .catch((e) => {
+              console.warn("Test sound failed again:", e);
+            });
+          window.removeEventListener("click", playTestSoundOnInteraction);
+        };
+
+        window.addEventListener("click", playTestSoundOnInteraction);
+        setTimeout(() => {
+          setAudioReady(true);
+        }, 1000);
       }
     };
 

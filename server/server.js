@@ -23,7 +23,16 @@ const storage = new Storage();
 const GCS_BUCKET_NAME = process.env.GCS_BUCKET_NAME;
 const os = require("os");
 const path = require("path");
-const { error } = require("console");
+const { error, log } = require("console");
+
+// Enhance console logging with timestamps and iTerm-friendly format
+["log", "info", "warn", "error"].forEach((method) => {
+  const original = console[method];
+  console[method] = (...args) => {
+    const timestamp = new Date().toTimeString().split(" ")[0]; // "HH:MM:SS"
+    original(`[${timestamp}] |`, ...args);
+  };
+});
 
 function setupGoogleCredentialsFromBase64() {
   const base64 = process.env.GCS_APPLICATION_CREDENTIALS_BASE64;
@@ -117,7 +126,7 @@ const phonemeToViseme = {
   sil: "rest",
 };
 
-const MAX_CHUNKS = 4;
+const MAX_CHUNKS = 30;
 
 const textChunkSize = 7000;
 
@@ -135,7 +144,7 @@ function splitTextByChars(text, maxChars = textChunkSize, overlap = 500) {
 app.post("/upload", upload.single("pdf"), async (req, res) => {
   try {
     console.log("📥 Received PDF upload...");
-
+    const sceneId = crypto.randomUUID(); // or whatever UUID you generate
     const filePath = req.file.path;
     const dataBuffer = fs.readFileSync(filePath);
     const parsed = await pdfParse(dataBuffer);
@@ -167,16 +176,73 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
         }
       }
     }
-
+    // Step here to clean speakerMap
     console.log("👥 Final Speaker Map:", Object.fromEntries(speakerMap));
+    // Log the start of the character cleaning process
+    console.log("[INFO] Starting character cleaning process...");
 
-    // const characters = {
-    //   characters: Array.from(characterSet).map((key) => {
-    //     const [speaker_label, name] = key.split("-");
-    //     return { name, role: "", speaker_label };
-    //   }),
-    //   last_speaker: { name: "", speaker_label: "" },
-    // };
+    // Call OpenAI to clean up the speakerMap and get unique characters
+    console.log("[INFO] Sending speaker map to OpenAI for cleaning...");
+    const charactersResponse = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content: `You are an expert in courtroom transcripts. Given a list of characters, clean up the list by removing duplicates and ensuring consistent naming conventions. Each character should have a unique ID, and their roles should be clearly defined. Return the same JSON format. Remove any Unknowns. Do not explain your answer.`,
+        },
+        {
+          role: "user",
+          content: JSON.stringify(Array.from(speakerMap.values())),
+        },
+      ],
+    });
+
+    // Log the raw response received from OpenAI
+    const rawCharacters = charactersResponse.choices[0].message.content;
+    console.log("[DEBUG] Raw characters response from OpenAI:", rawCharacters);
+
+    // Remove markdown formatting from the response
+    const cleanedCharacters = rawCharacters
+      .trim()
+      .replace(/^```(?:json)?\s*/i, "")
+      .replace(/```$/, "")
+      .trim();
+    console.log("[DEBUG] Cleaned characters JSON string:", cleanedCharacters);
+
+    // Parse the cleaned JSON into an object
+    let parsedCharacters;
+    try {
+      parsedCharacters = JSON.parse(cleanedCharacters);
+      console.log("[INFO] Successfully parsed cleaned characters.");
+    } catch (parseError) {
+      console.error(
+        "[ERROR] Failed to parse cleaned characters JSON:",
+        parseError
+      );
+      throw parseError;
+    }
+
+    // Clear and update the speakerMap with cleaned characters using the unique "id"
+    speakerMap.clear();
+    for (const char of parsedCharacters) {
+      speakerMap.set(char.id, {
+        name: char.name,
+        speaker_label: char.speaker_label,
+        role: char.role,
+        voice: assignVoiceForSpeaker(char.id), // assign voice now
+      });
+    }
+    console.log(
+      "[INFO] Updated speaker map with cleaned characters:",
+      Object.fromEntries(speakerMap)
+    );
+
+    // console.log(
+    //  `👥 Final Speaker Map after cleaning: ${JSON.stringify(
+    //   Object.fromEntries(speakerMap)
+    // )}`
+    //
+    //
 
     // console.log(
     //   `👥 Identified ${characters.characters.length} unique speakers`
@@ -215,40 +281,24 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
     const finalTranscript = await removeOverlapIteratively(
       processedChunks.map((c) => c.cleanedText)
     );
-    const lines = finalTranscript.split("\n").filter(Boolean);
-    const sceneId = crypto.randomUUID(); // or whatever UUID you generate
-
     const CONTEXT_WINDOW = 10;
+    const lines = finalTranscript.split("\n").filter(Boolean);
     let previousLines = [];
 
     for (let i = 0; i < lines.length; i++) {
-      const match = lines[i].match(/^(.+?):\s*(.+)$/);
-      if (!match) continue;
+      // const match = lines[i].match(/^(.+?):\s*(.+)$/);
+      // if (!match) continue;
 
-      const [_, speaker, text] = match;
+      // const [_, speaker, text] = match;
 
       const metadata = await generateMetadataForLine({
-        sceneId,
-        lineIndex: i,
-        speaker,
-        text,
-        previousLines, // Pass the sliding window of previous lines
+        text: lines[i],
+        previousLines,
       });
-      const speakerId = normalizeSpeakerId(speaker);
-      const speakerInfo = speakerMap.get(speakerId);
-      if (!speakerInfo) {
-        console.warn(`⚠️ Unknown speaker encountered: ${speaker}`);
-      }
-      function normalizeSpeakerId(name) {
-        return name
-          .trim()
-          .toLowerCase()
-          .replace(/[^a-z0-9]/g, "");
-      }
 
       const lineObj = {
-        character_id: speakerId,
-        text,
+        character_id: metadata.character_id,
+        text: metadata.text,
         posture: metadata.posture,
         emotion: metadata.emotion,
         zone: metadata.zone,
@@ -257,95 +307,102 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
         pause_before: metadata.pause_before,
         audio_url: metadata.audio_url,
         viseme_data: metadata.viseme_data,
-        role:
-          metadata.zone === "witness_at_witness_stand" &&
-          speakerInfo?.role === "defendant"
-            ? "witness"
-            : speakerInfo?.role || "unknown",
+        role: metadata.role,
       };
 
-      // Save the line to Supabase (unchanged)
       const lineData = {
         scene_id: sceneId,
         line_id: i + 1,
         line_obj: lineObj,
       };
+
       await saveToSupabase("gs3_lines", lineData).catch((error) =>
         console.error(`❌ Error saving line ${i + 1}:`, error.message)
       );
-      console.log("gs3_lines", lineData);
       console.log(`✅ Line ${i + 1} saved to Supabase`);
 
-      // Update previousLines sliding window: add the current line and remove the oldest if needed
       previousLines.push(lineObj);
-      if (previousLines.length > CONTEXT_WINDOW) {
-        previousLines.shift();
-      }
+      if (previousLines.length > CONTEXT_WINDOW) previousLines.shift();
     }
 
-    async function generateMetadataForLine({
-      sceneId,
-      lineIndex,
-      speaker,
-      text,
-      previousLines,
-    }) {
+    async function generateMetadataForLine({ text, previousLines }) {
       const metadata = await generateSceneMetadata({
         text,
-        speaker,
         previousLines, // Pass the entire sliding window for context
       });
 
       return {
         ...metadata,
-        audio_url: "audioUrl", // placeholder; your audio logic remains the same
-        viseme_data: {
-          duration: 2.3,
-          frames: [
-            { time: 0.0, viseme: "rest" },
-            { time: 0.3, viseme: "AA" },
-            { time: 1.2, viseme: "N" },
-            { time: 2.2, viseme: "rest" },
-          ],
-        },
+        // audio_url: "audioUrl", // placeholder; your audio logic remains the same
+        // viseme_data: {
+        //   duration: 2.3,
+        //   frames: [
+        //     { time: 0.0, viseme: "rest" },
+        //     { time: 0.3, viseme: "AA" },
+        //     { time: 1.2, viseme: "N" },
+        //     { time: 2.2, viseme: "rest" },
+        //   ],
+        // },
       };
     }
 
-    async function generateSceneMetadata({ text, speaker, previousLines }) {
+    async function generateSceneMetadata({ text, previousLines }) {
+      let speakerLine = "";
+      let currentLineText = "";
+
+      if (typeof text === "string" && text.includes(":")) {
+        const [rawSpeaker, ...lineParts] = text.split(":");
+        const estimatedSpeaker = rawSpeaker.trim();
+        const currentLine = lineParts.join(":").trim();
+
+        speakerLine = `Estimated speaker (potentially incorrect): "${estimatedSpeaker}"`;
+        currentLineText = `Current line: "${currentLine}"`;
+      }
+
       const prompt = `
       You're helping animate courtroom scenes. Given a character's current line of dialog and the full metadata of the previous line, return updated metadata for the current line in the following JSON format using the exact value options if specified. Do not create new values or change the numbers. Lawyer roles can be shared across characters.
       
       {
         "posture": "sitting" or "standing",
         "emotion": "neutral" or "tense" or "confident" or "nervous" or "defensive",
-        "role": "witness" or "prosecutor1" or "prosecutor2" or "defense1" or "defendant" (if seated at defendant seat, witness if at the witness stand),
+        "role": "witness" or "prosecutor1" or "prosecutor2" or "defense1",
         "eye_target": "judge" or "witness" or "prosecutor1" or "prosecutor2"" or "defense1" or "defendant" or "jury",
         "pause_before": "choose a number with respect to previous line for cinematic timing. 0.5 is a good default.",
+        "text": "Return only the speech of the character.",
+        "character_id": "The character_id of the character speaking the line. Make your best guess from the list.",
       }
-      Note that each character can only go in a zone that they are allowed in starting with their role name. Only the witness can be in the witness stand. 
+      
       Use the prior metadata to keep scene continuity but adapt based on the new dialog. DO NOT wrap your response in markdown or explanation — just return the raw JSON only.
       Defense team all have zone of defense_table_left.
       
-      Current speaker: ${speaker}
-      Current line: "${text}"
+      ${speakerLine}
+      ${currentLineText}
 
-      Previous Lines:
-      ${JSON.stringify(
-        previousLines.map((p) => {
-          return {
-            character_id: p.character_id,
-            text: p.text,
-            posture: p.posture,
-            emotion: p.emotion,
-          };
-        }),
-        null,
-        2
-      )}
-
-
+     Previous Lines:
+    ${JSON.stringify(
+      previousLines.map((p) => ({
+        character_id: p.character_id,
+        text: p.text,
+        posture: p.posture,
+        emotion: p.emotion,
+      })),
+      null,
+      2
+    )}
+    Characters: ${JSON.stringify(
+      Array.from(speakerMap.values()).map((char) => ({
+        name: char.name,
+        character_id:
+          char.id || char.name.toLowerCase().replace(/[^a-z0-9]/g, ""),
+        role: char.role,
+      })),
+      null,
+      2
+    )}
       `;
       console.log("\n📤 Sending scene metadata prompt to OpenAI:\n", prompt);
+      console.log(`Sent at: ${new Date().toISOString()}`);
+
       try {
         const response = await openai.chat.completions.create({
           model: "gpt-4o-mini",
@@ -359,7 +416,7 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
           .replace(/^```(?:json)?\s*/i, "")
           .replace(/```$/, "")
           .trim();
-
+        console.log(`OpenAI Response at: ${new Date().toISOString()}`);
         return JSON.parse(jsonText);
       } catch (err) {
         console.error(
@@ -539,15 +596,17 @@ async function assignZones(sceneId) {
     for (const row of rows) {
       const { line_id, line_obj } = row;
       const { character_id, role, text } = line_obj;
+      console.log(`Zone Assignment Beginning Line Object:`, line_obj);
 
       const prompt = `
 You are assigning spatial zones and camera angles in a courtroom animation based on dialogue context.
 
 Rules:
 - The **witness** must always be in "witness_at_witness_stand".
-- **Defense** roles should only be in "defense_table_left" or "defense_table_right".
-- **Prosecutors** must be in "prosecutor_table_left", "prosecutor_table_right", or "prosecutor_at_witness_stand".
-- Do not invent new zones. Choose the most contextually accurate location based on previous line zones and speaker roles.
+- **Defendants** must be in "defense_table_right" or "witness_at_witness_stand".
+- **Defense** roles should only be in "defense_table_left".
+- **Prosecutors** must be in "prosecutor_table_left", "prosecutor_at_witness_stand", "prosecutor_table_right",
+- Do not invent new zones. Choose the most contextually accurate location based on previous line zones and speaker roles and courtroom logic.
 Camera angles:
 - Choose a shot: "wide_establishing" or "crossExaminationFromWell" or "judge_closeup" or "witness_closeup" or "prosecutor_table" or "defense_table" or "bailiff_reaction" or "wide_view_from_jury",
 
@@ -590,6 +649,7 @@ ${JSON.stringify(
         .trim();
 
       const { zone, camera } = JSON.parse(json);
+      console.log(`Zone assignment for line ${line_id}:`, zone, camera);
 
       const updatedLineObj = {
         ...line_obj,
@@ -755,7 +815,6 @@ async function extractCharactersFromChunk(chunkText, speakerMap) {
     - Speaker label (e.g., "Q", "A", "THE COURT")
     - Role (one of these: judge, witness, defense1, defense2, prosecutor1, prosecutor2, defendant)
     - A normalized ID (lowercase, no spaces or punctuation — used for database keys)
-    
     Return an array like:
     
     [
@@ -870,28 +929,51 @@ async function cleanText(chunkText, speakerMap, lastSpeaker, lastLine) {
   }
 }
 
-async function removeOverlapIteratively(cleanedChunks) {
+async function removeOverlapIteratively(cleanedChunks, overlapSize = 1000) {
   if (cleanedChunks.length === 0) return "";
+
   let mergedTranscript = cleanedChunks[0];
+
   for (let i = 1; i < cleanedChunks.length; i++) {
+    const leftOverlap = mergedTranscript.slice(-overlapSize);
+    const rightOverlap = cleanedChunks[i].slice(0, overlapSize);
+
     const prompt = `
-Below are two consecutive transcript segments with some overlapping dialog.
-Remove duplicate or repeated lines and merge them into one clean transcript.
+Two courtroom transcript segments may have overlapping or repeated dialogue at their boundaries. Your task is to merge them cleanly **only at the overlap**, keeping only one version of repeated lines.
 
-Segment 1:
-${mergedTranscript}
+Return the clean merged result in "Speaker: line" format. No explanations, no markdown.
 
-Segment 2:
-${cleanedChunks[i]}
+LEFT (end of previous segment):
+${leftOverlap}
 
-Return only the merged transcript in the "Speaker Name: line" format.
-`;
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [{ role: "system", content: prompt }],
-    });
-    mergedTranscript = response.choices[0].message.content.trim();
+RIGHT (start of current segment):
+${rightOverlap}
+
+Merged segment:
+`.trim();
+
+    try {
+      const response = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [{ role: "system", content: prompt }],
+      });
+
+      const mergedBoundary = response.choices[0].message.content.trim();
+
+      // Stitch together: previous non-overlap + merged + next non-overlap
+      const leftPreserved = mergedTranscript.slice(0, -overlapSize);
+      const rightPreserved = cleanedChunks[i].slice(overlapSize);
+      mergedTranscript = leftPreserved + mergedBoundary + rightPreserved;
+
+      console.log(
+        `✅ Merged chunk ${i - 1} + ${i} (${mergedBoundary.length} chars)`
+      );
+    } catch (err) {
+      console.warn(`⚠️ Failed to merge chunks ${i - 1} + ${i}:`, err.message);
+      mergedTranscript += "\n" + cleanedChunks[i]; // fallback: append as-is
+    }
   }
+
   return mergedTranscript;
 }
 

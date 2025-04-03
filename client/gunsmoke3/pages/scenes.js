@@ -4,17 +4,24 @@ import { getSupabase } from "../utils/supabase";
 export async function getServerSideProps() {
   const supabase = getSupabase();
 
-  const { data: scenes, error } = await supabase
-    .from("gs3_scenes")
-    .select("scene_id, scene_name, metadata, created_at")
-    .order("created_at", { ascending: false });
+  const { data: scenes } = await supabase.from("gs3_scenes").select("*");
 
-  if (error) {
-    console.error("❌ Error fetching scenes:", error.message);
-    return { props: { scenes: [] } };
-  }
+  const { data: lineCounts } = await supabase
+    .from("gs3_line_counts")
+    .select("*");
 
-  return { props: { scenes } };
+  const countMap = new Map(
+    lineCounts.map((row) => [row.scene_id, row.line_count])
+  );
+
+  const scenesWithCount = scenes
+    .map((scene) => ({
+      ...scene,
+      line_count: countMap.get(scene.scene_id) || 0,
+    }))
+    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at)); // Most recent first
+
+  return { props: { scenes: scenesWithCount } };
 }
 
 function formatDateTime(isoString) {
@@ -70,6 +77,15 @@ export default function ScenesPage({ scenes }) {
                   {scene.metadata?.title || scene.scene_name}
                 </p>
               </Link>
+              <p
+                style={{
+                  fontSize: "0.9rem",
+                  color: "#bbb",
+                  marginTop: "4px",
+                }}
+              >
+                {scene.line_count} {scene.line_count === 1 ? "line" : "lines"}
+              </p>
 
               <p
                 style={{
