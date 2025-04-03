@@ -1,4 +1,5 @@
 // components/CourtroomScene.jsx
+import { v4 as uuidv4 } from "uuid";
 import { ClerkBox } from "@/components/CourtroomPrimatives";
 import { Canvas, useFrame } from "@react-three/fiber";
 import { OrbitControls, Environment } from "@react-three/drei";
@@ -34,6 +35,8 @@ import {
 } from "@/components/CourtroomPrimatives";
 
 export default function CourtroomScene({ lines, sceneId }) {
+  const sessionId = useMemo(() => uuidv4(), []);
+
   const [currentIndex, setCurrentIndex] = useState(-1);
   const [activeSpeakerId, setActiveSpeakerId] = useState(null);
   // State to track the audio's current time for viseme timing.
@@ -130,9 +133,7 @@ export default function CourtroomScene({ lines, sceneId }) {
   };
 
   // --- Helper: runPlayback ---
-  // Iterates serially through all lines, updates the current index and active speaker,
-  // plays each audio clip, waits the specified pause, then moves to the next clip.
-  // When finished, stops the recording.
+  // --- Updated runPlayback for Line-Based Cuts ---
   const runPlayback = async () => {
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
@@ -140,29 +141,62 @@ export default function CourtroomScene({ lines, sceneId }) {
       setCurrentIndex(i);
       setActiveSpeakerId(line_obj.character_id);
 
-      // Play the current audio clip.
+      // Start a new recording segment for this line.
+      console.log(`🎤 Starting recording for line ${line_id}`);
+
+      startRecordingSegment();
+
+      // Play the audio clip for the current line.
       await playLineAudio(line_id, line_obj.audio_url);
 
-      // Wait for the specified pause (default to 0.5 seconds) before playing the next clip.
+      // Wait for the specified pause (default 0.5 seconds) after the line.
       const pause = line_obj.pause_before ?? 0.5;
       await new Promise((r) => setTimeout(r, pause * 1000));
-    }
 
-    // After all lines are played, stop the recording.
-    if (mediaRecorder.current && mediaRecorder.current.state === "recording") {
-      mediaRecorder.current.stop();
-      console.log("Recording stopped after final line.");
+      // Stop the recording segment.
+      const blob = await stopRecordingSegment();
+      console.log(`🎤 Stopping recording for line ${line_id}`);
+      // Process or send the recorded segment blob.
+      if (blob) {
+        const formData = new FormData();
+        formData.append("video", blob, `scene_segment_${i}.webm`);
+        formData.append("sessionId", sessionId);
+        formData.append("segmentIndex", i.toString());
+        formData.append("sceneId", sceneId);
+
+        try {
+          const res = await fetch("http://localhost:3001/convert", {
+            method: "POST",
+            body: formData,
+          });
+          const convertedBlob = await res.blob();
+          // Optional: Trigger a download for the segment.
+          const url = URL.createObjectURL(convertedBlob);
+          const link = document.createElement("a");
+          link.href = url;
+          link.download = `scene_segment_${i}.mp4`;
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+          URL.revokeObjectURL(url);
+          console.log(`✅ MP4 downloaded for segment ${i}`);
+        } catch (err) {
+          console.error("❌ Upload or conversion failed:", err);
+        }
+      }
     }
   };
 
-  // --- Start Recording Function ---
-  const startRecording = () => {
+  // --- New Recording Segment Functions ---
+  const startRecordingSegment = () => {
+    // Reinitialize the audio destination for a fresh stream segment.
+    audioDestRef.current =
+      audioContextRef.current.createMediaStreamDestination();
+    // Reset previously recorded chunks.
+    recordedChunks.current = [];
     if (!canvasRef.current || !audioDestRef.current) return;
-    // Capture the canvas at 60 fps (ensure preserveDrawingBuffer is enabled)
     const canvasStream = canvasRef.current.captureStream(60);
-    // Get the audio stream from our MediaStreamDestination.
     const audioStream = audioDestRef.current.stream;
-    // Combine video and audio tracks.
     const combinedStream = new MediaStream([
       ...canvasStream.getTracks(),
       ...audioStream.getTracks(),
@@ -175,35 +209,81 @@ export default function CourtroomScene({ lines, sceneId }) {
         recordedChunks.current.push(event.data);
       }
     };
-    mediaRecorder.current.onstop = () => {
-      const blob = new Blob(recordedChunks.current, { type: "video/webm" });
-      const formData = new FormData();
-      formData.append("video", blob, "scene.webm");
-
-      fetch("http://localhost:3001/convert", {
-        method: "POST",
-        body: formData,
-      })
-        .then(async (res) => {
-          const blob = await res.blob();
-          const url = URL.createObjectURL(blob);
-          const link = document.createElement("a");
-          link.href = url;
-          link.download = "scene.mp4";
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
-          URL.revokeObjectURL(url);
-          console.log("✅ MP4 downloaded");
-        })
-        .catch((err) => {
-          console.error("❌ Upload or conversion failed:", err);
-        });
-    };
-
-    mediaRecorder.current.start();
-    console.log("Recording started.");
+    // Start recording with a timeslice (e.g., 1000ms).
+    mediaRecorder.current.start(1000);
+    console.log("Segment recording started with timeslice 1000ms.");
   };
+
+  const stopRecordingSegment = () => {
+    return new Promise((resolve, reject) => {
+      if (
+        mediaRecorder.current &&
+        mediaRecorder.current.state === "recording"
+      ) {
+        mediaRecorder.current.onstop = () => {
+          const blob = new Blob(recordedChunks.current, { type: "video/webm" });
+          resolve(blob);
+        };
+        mediaRecorder.current.stop();
+        console.log("Segment recording stopped.");
+      } else {
+        resolve(null);
+      }
+    });
+  };
+
+  // --- Start Recording Function ---
+  // const startRecording = () => {
+  //   if (!canvasRef.current || !audioDestRef.current) return;
+  //   // Capture the canvas at 60 fps (ensure preserveDrawingBuffer is enabled)
+  //   const canvasStream = canvasRef.current.captureStream(60);
+  //   // Get the audio stream from our MediaStreamDestination.
+  //   const audioStream = audioDestRef.current.stream;
+  //   // Combine video and audio tracks.
+  //   const combinedStream = new MediaStream([
+  //     ...canvasStream.getTracks(),
+  //     ...audioStream.getTracks(),
+  //   ]);
+  //   mediaRecorder.current = new MediaRecorder(combinedStream, {
+  //     mimeType: "video/webm; codecs=vp9",
+  //   });
+  //   mediaRecorder.current.ondataavailable = (event) => {
+  //     if (event.data.size > 0) {
+  //       recordedChunks.current.push(event.data);
+  //     }
+  //   };
+  //   mediaRecorder.current.onstop = () => {
+  //     const blob = new Blob(recordedChunks.current, { type: "video/webm" });
+  //     const formData = new FormData();
+  //     formData.append("video", blob, "scene.webm");
+  //     formData.append("sessionId", sessionId);
+
+  //     // add sceneId to formData
+
+  //     fetch("http://localhost:3001/convert", {
+  //       method: "POST",
+  //       body: formData,
+  //     })
+  //       .then(async (res) => {
+  //         const blob = await res.blob();
+  //         const url = URL.createObjectURL(blob);
+  //         const link = document.createElement("a");
+  //         link.href = url;
+  //         link.download = "scene.mp4";
+  //         document.body.appendChild(link);
+  //         link.click();
+  //         document.body.removeChild(link);
+  //         URL.revokeObjectURL(url);
+  //         console.log("✅ MP4 downloaded");
+  //       })
+  //       .catch((err) => {
+  //         console.error("❌ Upload or conversion failed:", err);
+  //       });
+  //   };
+
+  //   mediaRecorder.current.start();
+  //   console.log("Recording started.");
+  // };
 
   // --- Key Handler for Start Recording & Serial Playback ---
   useEffect(() => {
@@ -227,7 +307,7 @@ export default function CourtroomScene({ lines, sceneId }) {
         ) {
           await audioContextRef.current.resume();
         }
-        startRecording();
+        // startRecording();
         // Start serial playback for all lines.
         runPlayback();
       }

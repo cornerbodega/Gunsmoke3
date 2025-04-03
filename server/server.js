@@ -1198,20 +1198,32 @@ app.get("/audio-proxy", async (req, res) => {
 });
 
 app.post("/convert", upload.single("video"), (req, res) => {
+  // Expect sceneId in the form data
+  const sceneId = req.body.sceneId;
+  const sessionId = req.body.sessionId;
+  const segmentIndex = req.body.segmentIndex;
+  const folderName = `${sessionId}-${sceneId}`;
+  const folderPath = path.join(__dirname, "videos", folderName);
+
+  // Create the folder if it doesn't exist
+  if (!fs.existsSync(folderPath)) {
+    fs.mkdirSync(folderPath, { recursive: true });
+  }
+
   const inputPath = req.file.path;
-  const outputPath = `${inputPath}.mp4`;
+  const outputFileName = `${segmentIndex}.mp4`;
+  const outputPath = path.join(folderPath, outputFileName);
+
+  console.log(`Converting ${inputPath} to ${outputPath}`);
 
   ffmpeg(inputPath)
     .output(outputPath)
     .videoCodec("libx264")
     .audioCodec("aac")
     .on("end", () => {
-      res.download(outputPath, "scene.mp4", (err) => {
-        // Clean up temp files
-        fs.unlinkSync(inputPath);
-        fs.unlinkSync(outputPath);
-        if (err) console.error("Download error:", err);
-      });
+      console.log(`Conversion finished: ${outputPath}`);
+      fs.unlinkSync(inputPath); // Clean up the temporary input file
+      res.json({ message: "Video segment converted and saved" });
     })
     .on("error", (err) => {
       console.error("FFmpeg error:", err);

@@ -1,0 +1,6 @@
+rm -f filelist.txt
+for f in $(ls *.mp4 | sort -n -t. -k1); do
+  echo "file '$f'" >> filelist.txt
+done
+
+ffmpeg -f concat -safe 0 -i filelist.txt -c copy output.mp4
