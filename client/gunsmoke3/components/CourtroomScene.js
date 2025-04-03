@@ -39,7 +39,7 @@ export default function CourtroomScene({ lines, sceneId }) {
   // State to track the audio's current time for viseme timing.
   const [currentAudioTime, setCurrentAudioTime] = useState(0);
   const characterRefs = useRef({});
-  const audioMap = useRef({});
+  // (Removed audioMap since we no longer preload thousands of audio files)
   // Shared lookTargetRef for non‑speakers and active speaker target
   const lookTargetRef = useRef(new THREE.Object3D());
   const speakerTargetRef = useRef(new THREE.Object3D());
@@ -63,73 +63,97 @@ export default function CourtroomScene({ lines, sceneId }) {
   }, []);
   const [audioReady, setAudioReady] = useState(false); // ⬅️ Add this
 
-  // --- Load a rolling window of 10 audio files
+  // --- New Effect: Set audioReady on first user interaction ---
+  // This ensures that the browser allows audio playback.
   useEffect(() => {
-    if (!lines?.length) return;
-
-    // Determine the starting index for our rolling window.
-    const startIndex = currentIndex === -1 ? 0 : currentIndex;
-    const windowLines = lines.slice(startIndex, startIndex + 10);
-
-    const loadWindowAudio = async () => {
-      for (const { line_id, line_obj } of windowLines) {
-        // Skip if audio for this line is already loaded.
-        if (audioMap.current[line_id]) continue;
-
-        const gcsUrl = line_obj.audio_url.trim();
-        const proxiedUrl = `/api/audio-proxy?url=${encodeURIComponent(gcsUrl)}`;
-        const audio = new Audio(proxiedUrl);
-        audio.crossOrigin = "anonymous";
-        audio.preload = "auto";
-
-        try {
-          await new Promise((resolve, reject) => {
-            audio.addEventListener("canplaythrough", resolve, { once: true });
-            audio.addEventListener("error", reject, { once: true });
-          });
-
-          if (audioContextRef.current && audioDestRef.current) {
-            const source =
-              audioContextRef.current.createMediaElementSource(audio);
-            source.connect(audioContextRef.current.destination);
-            source.connect(audioDestRef.current);
-          }
-
-          audioMap.current[line_id] = audio;
-        } catch (err) {
-          console.error(`❌ Error loading audio for line ${line_id}:`, err);
-        }
-      }
-      if (!audioReady && windowLines.length > 0) {
-        console.log(
-          "✅ Finished loading initial audio window. Setting audioReady = true"
-        );
-
-        // Play a test sound
-        const playTestSoundOnInteraction = () => {
-          console.log(`🔊 Playing test sound...`);
-
-          const testAudio = new Audio("/ready-sound.mp3");
-          testAudio
-            .play()
-            .then(() => {
-              console.log("✅ Test sound played after user interaction.");
-            })
-            .catch((e) => {
-              console.warn("Test sound failed again:", e);
-            });
-          window.removeEventListener("click", playTestSoundOnInteraction);
-        };
-
-        window.addEventListener("click", playTestSoundOnInteraction);
-        setTimeout(() => {
-          setAudioReady(true);
-        }, 1000);
-      }
+    const handleUserInteraction = () => {
+      setAudioReady(true);
+      window.removeEventListener("click", handleUserInteraction);
     };
+    window.addEventListener("click", handleUserInteraction);
+    return () => window.removeEventListener("click", handleUserInteraction);
+  }, []);
 
-    loadWindowAudio();
-  }, [lines, currentIndex, audioReady]);
+  // --- Helper: playLineAudio ---
+  // Loads a single audio clip, routes it to the recording destination,
+  // plays it, and then cleans up the source node and audio element.
+  const playLineAudio = async (lineId, audioUrl) => {
+    return new Promise((resolve, reject) => {
+      const audio = new Audio(
+        `/api/audio-proxy?url=${encodeURIComponent(audioUrl)}`
+      );
+      audio.crossOrigin = "anonymous";
+      audio.preload = "auto";
+
+      let sourceNode = null;
+
+      const onEnded = () => {
+        // Disconnect and allow cleanup of the audio element.
+        if (sourceNode) {
+          try {
+            sourceNode.disconnect();
+          } catch (e) {
+            console.warn(`Failed to disconnect for ${lineId}`, e);
+          }
+          sourceNode = null;
+        }
+        // Remove the audio element so it can be garbage collected.
+        audio.remove();
+        resolve();
+      };
+
+      const onError = (err) => {
+        console.error(`Error playing audio for ${lineId}`, err);
+        reject(err);
+      };
+
+      audio.addEventListener(
+        "canplaythrough",
+        () => {
+          try {
+            sourceNode =
+              audioContextRef.current.createMediaElementSource(audio);
+            // Connect to both the default destination and the MediaStreamDestination for recording.
+            sourceNode.connect(audioContextRef.current.destination);
+            sourceNode.connect(audioDestRef.current);
+            audio.play().catch(onError);
+          } catch (e) {
+            onError(e);
+          }
+        },
+        { once: true }
+      );
+
+      audio.addEventListener("ended", onEnded, { once: true });
+      audio.addEventListener("error", onError, { once: true });
+    });
+  };
+
+  // --- Helper: runPlayback ---
+  // Iterates serially through all lines, updates the current index and active speaker,
+  // plays each audio clip, waits the specified pause, then moves to the next clip.
+  // When finished, stops the recording.
+  const runPlayback = async () => {
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const { line_id, line_obj } = line;
+      setCurrentIndex(i);
+      setActiveSpeakerId(line_obj.character_id);
+
+      // Play the current audio clip.
+      await playLineAudio(line_id, line_obj.audio_url);
+
+      // Wait for the specified pause (default to 0.5 seconds) before playing the next clip.
+      const pause = line_obj.pause_before ?? 0.5;
+      await new Promise((r) => setTimeout(r, pause * 1000));
+    }
+
+    // After all lines are played, stop the recording.
+    if (mediaRecorder.current && mediaRecorder.current.state === "recording") {
+      mediaRecorder.current.stop();
+      console.log("Recording stopped after final line.");
+    }
+  };
 
   // --- Start Recording Function ---
   const startRecording = () => {
@@ -181,80 +205,42 @@ export default function CourtroomScene({ lines, sceneId }) {
     console.log("Recording started.");
   };
 
-  // --- Key Handler for Next Line & Start Recording on Enter ---
+  // --- Key Handler for Start Recording & Serial Playback ---
   useEffect(() => {
-    const handleKeyDown = (e) => {
+    const handleKeyDown = async (e) => {
       console.log("↩️ Enter key pressed");
       console.log("audioReady:", audioReady);
       console.log("headRefsReady:", headRefsReady);
       console.log("currentIndex:", currentIndex);
-      console.log("audioMap keys:", Object.keys(audioMap.current));
-
-      if (!headRefsReady || !audioReady || e.key !== "Enter")
-        return console.log(`❌ Not ready to start recording`); // ⬅️ Check if audio is ready
-      console.log("Enter key pressed. headRefsReady:", headRefsReady);
+      // Check that headRefs and audio are ready, and key is Enter.
+      if (!headRefsReady || !audioReady || e.key !== "Enter") {
+        return console.log(`❌ Not ready to start recording`);
+      }
       if (currentIndex === -1) {
         setAutoPlay(true); // trigger auto-play
         setCurrentIndex(0); // start from the first line
 
-        // Start recording on first Enter press.
+        // Resume AudioContext if it is suspended.
         if (
           audioContextRef.current &&
           audioContextRef.current.state === "suspended"
         ) {
-          audioContextRef.current.resume();
+          await audioContextRef.current.resume();
         }
         startRecording();
-
-        const firstLine = lines[0];
-        const audio = audioMap.current[firstLine.line_id];
-        if (audio) {
-          audio.preload = "auto";
-          audio.load();
-          audio.addEventListener("playing", () =>
-            console.log("Audio playing for line:", firstLine.line_id)
-          );
-          audio.addEventListener("ended", () =>
-            console.log("Audio ended for line:", firstLine.line_id)
-          );
-          audio.addEventListener("error", (err) =>
-            console.error("Audio error for line:", firstLine.line_id, err)
-          );
-          audio.currentTime = 0;
-          audio
-            .play()
-            .catch((err) =>
-              console.error(
-                "Error playing audio for line:",
-                firstLine.line_id,
-                err
-              )
-            );
-          // setActiveSpeakerId(firstLine.line_obj.role);
-          setActiveSpeakerId(firstLine.line_obj.character_id); // ✅ use character_id
-        }
+        // Start serial playback for all lines.
+        runPlayback();
       }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [currentIndex, lines, headRefsReady, audioReady, audioMap]);
+  }, [currentIndex, lines, headRefsReady, audioReady]);
 
-  // --- Update currentAudioTime using the active audio element ---
-  useEffect(() => {
-    if (currentIndex === -1) return;
-    const currentLine = lines[currentIndex];
-    const audio = audioMap.current[currentLine.line_id];
-    if (!audio) return;
-    const updateTime = () => {
-      setCurrentAudioTime(audio.currentTime);
-    };
-    audio.addEventListener("timeupdate", updateTime);
-    return () => {
-      audio.removeEventListener("timeupdate", updateTime);
-    };
-  }, [currentIndex, lines]);
+  // --- (Removed update effect using audioMap for currentAudioTime) ---
+  // Since we no longer store audio elements in audioMap, this effect has been removed.
+  // If needed, you could implement a separate mechanism to track the currently playing audio.
 
-  // --- One-Time Update on New Line ---
+  // --- One-Time Update on New Line (unchanged) ---
   useEffect(() => {
     if (currentIndex === -1) return;
     const currentLine = lines[currentIndex]?.line_obj;
@@ -310,71 +296,6 @@ export default function CourtroomScene({ lines, sceneId }) {
       }
     }
   }, [currentIndex, lines]);
-
-  // --- Auto-Play Progression & Stop Recording on Last Line ---
-  useEffect(() => {
-    if (!autoPlay || currentIndex === -1) return;
-    const currentLine = lines[currentIndex];
-    console.log(`Auto-playing line: ${currentLine.line_id}`);
-    console.log(`audioMap.current:`, audioMap.current);
-
-    const audio = audioMap.current[currentLine.line_id];
-    const pauseBefore = currentLine.line_obj.pause_before ?? 0.5;
-    if (!audio)
-      return console.log(`Audio not found for line: ${currentLine.line_id}`);
-    const handleAudioEnd = () => {
-      console.log("Audio ended for line:", currentLine.line_id);
-
-      // Clean up finished audio from audioMap after a short delay
-      // to ensure MediaRecorder finishes routing it
-      setTimeout(() => {
-        if (audioMap.current[currentLine.line_id]) {
-          audioMap.current[currentLine.line_id].src = "";
-          delete audioMap.current[currentLine.line_id];
-          console.log(`🧹 Cleaned up audio for line ${currentLine.line_id}`);
-        }
-      }, 1000); // 1 second buffer to be safe
-
-      if (currentIndex < lines.length - 1) {
-        setTimeout(() => {
-          const nextIndex = currentIndex + 1;
-          const nextLine = lines[nextIndex];
-          const nextAudio = audioMap.current[nextLine.line_id];
-          if (nextAudio) {
-            nextAudio.currentTime = 0;
-            nextAudio.load();
-            nextAudio
-              .play()
-              .catch((err) =>
-                console.error(
-                  "Error playing next audio for line:",
-                  nextLine.line_id,
-                  err
-                )
-              );
-            console.log(`Playing next audio: ${nextLine.line_id}`);
-          } else {
-            console.warn(`Next audio not found for line: ${nextLine.line_id}`);
-          }
-          setCurrentIndex(nextIndex);
-          setActiveSpeakerId(nextLine.line_obj.character_id);
-        }, (currentLine.line_obj.pause_before ?? 0.5) * 1000);
-      } else {
-        if (
-          mediaRecorder.current &&
-          mediaRecorder.current.state === "recording"
-        ) {
-          mediaRecorder.current.stop();
-          console.log("Recording stopped after final line.");
-        }
-      }
-    };
-
-    audio.addEventListener("ended", handleAudioEnd);
-    return () => {
-      audio.removeEventListener("ended", handleAudioEnd);
-    };
-  }, [autoPlay, currentIndex, lines]);
 
   // --- Continuously Update Targets (inside Canvas) ---
   function TargetUpdater() {
@@ -608,6 +529,7 @@ export default function CourtroomScene({ lines, sceneId }) {
       shirt_color: palette.shirtColors[(hash + 2) % palette.shirtColors.length],
     };
   };
+
   const getZoneOccupancy = (lines, currentIndex) => {
     const zoneOccupancy = {};
     const characterZones = {};
@@ -662,7 +584,7 @@ export default function CourtroomScene({ lines, sceneId }) {
         style={{ background: "#222" }}
         gl={{
           preserveDrawingBuffer: true,
-          outputEncoding: THREE.sRGBEncoding,
+          outputEncoding: THREE.SRGBEncoding,
           toneMapping: THREE.ACESFilmicToneMapping,
           toneMappingExposure: 1,
         }}
@@ -750,14 +672,10 @@ export default function CourtroomScene({ lines, sceneId }) {
                     lines,
                     currentIndex === -1 ? lines.length - 1 : currentIndex
                   );
-                  // Force 'defense1' to be at 'defense_table_left' if not already present
-                  // if (!zoneOccupancy["defense_table_left"]) {
-                  //   zoneOccupancy["defense_table_left"] = "defense1";
-                  // }
+                  // Force 'prosecutor_table_right' if not already set.
                   if (!zoneOccupancy["prosecutor_table_right"]) {
                     zoneOccupancy["prosecutor_table_right"] = "prosecutor";
                   }
-
                   return Object.entries(zoneOccupancy).map(
                     ([zone, characterId]) => {
                       if (!characterId) return null;
