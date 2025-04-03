@@ -165,20 +165,20 @@ export default function CourtroomScene({ lines, sceneId }) {
         formData.append("sceneId", sceneId);
 
         try {
-          const res = await fetch("http://localhost:3001/convert", {
+          fetch("http://localhost:3001/convert", {
             method: "POST",
             body: formData,
           });
-          const convertedBlob = await res.blob();
-          // Optional: Trigger a download for the segment.
-          const url = URL.createObjectURL(convertedBlob);
-          const link = document.createElement("a");
-          link.href = url;
-          link.download = `scene_segment_${i}.mp4`;
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
-          URL.revokeObjectURL(url);
+          // const convertedBlob = await res.blob();
+          // // Optional: Trigger a download for the segment.
+          // const url = URL.createObjectURL(convertedBlob);
+          // const link = document.createElement("a");
+          // link.href = url;
+          // link.download = `scene_segment_${i}.mp4`;
+          // document.body.appendChild(link);
+          // link.click();
+          // document.body.removeChild(link);
+          // URL.revokeObjectURL(url);
           console.log(`✅ MP4 downloaded for segment ${i}`);
         } catch (err) {
           console.error("❌ Upload or conversion failed:", err);
