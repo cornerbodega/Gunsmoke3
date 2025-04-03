@@ -324,6 +324,17 @@ export default function CourtroomScene({ lines, sceneId }) {
       return console.log(`Audio not found for line: ${currentLine.line_id}`);
     const handleAudioEnd = () => {
       console.log("Audio ended for line:", currentLine.line_id);
+
+      // Clean up finished audio from audioMap after a short delay
+      // to ensure MediaRecorder finishes routing it
+      setTimeout(() => {
+        if (audioMap.current[currentLine.line_id]) {
+          audioMap.current[currentLine.line_id].src = "";
+          delete audioMap.current[currentLine.line_id];
+          console.log(`🧹 Cleaned up audio for line ${currentLine.line_id}`);
+        }
+      }, 1000); // 1 second buffer to be safe
+
       if (currentIndex < lines.length - 1) {
         setTimeout(() => {
           const nextIndex = currentIndex + 1;
@@ -346,14 +357,9 @@ export default function CourtroomScene({ lines, sceneId }) {
             console.warn(`Next audio not found for line: ${nextLine.line_id}`);
           }
           setCurrentIndex(nextIndex);
-          console.log(`Moving to next line: ${nextLine.line_id}`);
-
-          // setActiveSpeakerId(nextLine.line_obj.role);
-          setCurrentIndex(nextIndex);
-          setActiveSpeakerId(nextLine.line_obj.character_id); // this was the missing piece
-        }, pauseBefore * 1000);
+          setActiveSpeakerId(nextLine.line_obj.character_id);
+        }, (currentLine.line_obj.pause_before ?? 0.5) * 1000);
       } else {
-        // Final line finished – stop the recording.
         if (
           mediaRecorder.current &&
           mediaRecorder.current.state === "recording"
