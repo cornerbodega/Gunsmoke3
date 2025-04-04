@@ -1,6 +1,7 @@
 require("dotenv").config();
 const { createClient } = require("@supabase/supabase-js");
 const saveToSupabase = require("./utils/saveToSupabase");
+const crypto = require("crypto");
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
