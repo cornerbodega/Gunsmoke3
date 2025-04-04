@@ -15,6 +15,8 @@ const fs = require("fs");
 const OpenAI = require("openai");
 const speakerVoiceMap = new Map();
 const ffmpeg = require("fluent-ffmpeg");
+const ffmpegPath = require("@ffmpeg-installer/ffmpeg").path;
+ffmpeg.setFfmpegPath(ffmpegPath);
 
 const textToSpeech = require("@google-cloud/text-to-speech");
 const client = new textToSpeech.TextToSpeechClient();
@@ -1282,41 +1284,67 @@ app.get("/audio-proxy", async (req, res) => {
     res.status(500).send("Proxy failed");
   }
 });
-
 app.post("/convert", upload.single("video"), (req, res) => {
-  // Expect sceneId in the form data
   const sceneId = req.body.sceneId;
   const sessionId = req.body.sessionId;
+
   const line_id = req.body.line_id;
   const folderName = `${sessionId}-${sceneId}`;
   const folderPath = path.join(__dirname, "videos", folderName);
 
-  // Create the folder if it doesn't exist
+  if (!req.file) {
+    return res.status(400).send("No video file uploaded.");
+  }
+
+  const inputPath = req.file.path;
+
+  const outputFileName = `${line_id}.mp4`;
+
+  const outputPath = path.join(folderPath, outputFileName);
+
+  // Ensure folder exists
   if (!fs.existsSync(folderPath)) {
     fs.mkdirSync(folderPath, { recursive: true });
   }
 
-  const inputPath = req.file.path;
-  const outputFileName = `${line_id}.mp4`;
-  const outputPath = path.join(folderPath, outputFileName);
+  // Check input file before proceeding
+  if (!fs.existsSync(inputPath)) {
+    console.error("❌ Input file missing:", inputPath);
+    return res.status(400).send("Missing uploaded file.");
+  }
 
-  console.log(`Converting ${inputPath} to ${outputPath}`);
+  const stats = fs.statSync(inputPath);
+  if (stats.size < 1000) {
+    console.error("❌ Input file is too small (likely corrupt):", inputPath);
+    fs.unlinkSync(inputPath);
+    return res.status(400).send("Uploaded file is empty or corrupt.");
+  }
+
+  console.log(
+    `📹 Converting ${inputPath} (${(stats.size / 1024 / 1024).toFixed(
+      2
+    )} MB) to ${outputPath}`
+  );
 
   ffmpeg(inputPath)
-    .output(outputPath)
+    .inputFormat("webm")
     .videoCodec("libx264")
     .audioCodec("aac")
+    .videoFilters("scale=ceil(iw/2)*2:ceil(ih/2)*2") // 👈 FIX
+    .outputOptions(["-movflags +faststart", "-pix_fmt yuv420p", "-r 30"])
+    .on("start", (cmd) => console.log("🎬 FFmpeg started:", cmd))
+    .on("stderr", (line) => console.log("🧪 FFmpeg stderr:", line))
     .on("end", () => {
-      console.log(`Conversion finished: ${outputPath}`);
-      fs.unlinkSync(inputPath); // Clean up the temporary input file
+      console.log(`✅ Conversion finished: ${outputPath}`);
+      fs.unlinkSync(inputPath);
       res.json({ message: "Video segment converted and saved" });
     })
     .on("error", (err) => {
-      console.error("FFmpeg error:", err);
-      fs.unlinkSync(inputPath);
+      console.error("❌ FFmpeg error:", err.message || err);
+      if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
       res.status(500).send("Conversion failed");
     })
-    .run();
+    .save(outputPath);
 });
 
 app.listen(port, () => {

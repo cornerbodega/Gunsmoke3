@@ -96,12 +96,26 @@ export default function MouthViseme({
   };
 
   useFrame(() => {
+    console.log(`[Mouth] audioTime: ${audioTime?.toFixed(2)}`);
+  });
+  
+  useFrame(() => {
     // === Update viseme texture ===
+    console.log(`[MouthViseme] audioTime: ${audioTime?.toFixed(2)}`);
+
     const viseme = getVisemeForTime(audioTime ?? 0);
+    console.log(`[MouthViseme] viseme: ${viseme}`);
+
+    // console.log(`${JSON.stringify(viseme)}`)
     const textureKey = visemeToTextureKey[viseme] || "E";
+    console.log(`[MouthViseme] textureKey: ${textureKey}`);
+
     const nextTexture = textureMap[textureKey] || textureMap.M;
     if (nextTexture !== currentTexture) {
+
       setCurrentTexture(nextTexture);
+      console.log(`Setting texture`);
+      
     }
 
     // === Flip mouth based on camera position ===

@@ -130,6 +130,13 @@ export default function CourtroomScene({
             sourceNode.connect(audioContextRef.current.destination);
             sourceNode.connect(audioDestRef.current);
             audio.play().catch(onError);
+            const updateTime = () => {
+              setCurrentAudioTime(audio.currentTime);
+              if (!audio.ended) {
+                requestAnimationFrame(updateTime);
+              }
+            };
+            requestAnimationFrame(updateTime);
           } catch (e) {
             onError(e);
           }
@@ -153,7 +160,9 @@ export default function CourtroomScene({
       const originalIndex = startFromIndex + i;
       setCurrentIndex(originalIndex); // so UI reflects correct index in the full list
       setActiveSpeakerId(line_obj.character_id);
+      console.log(`Line ${JSON.stringify(line_obj)}`);
 
+      // Start a new recording segment for this line.
       console.log(`🎤 Starting recording for line ${line_id}`);
       startRecordingSegment();
       await playLineAudio(line_id, line_obj.audio_url);
@@ -312,6 +321,10 @@ export default function CourtroomScene({
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [currentIndex, lines, headRefsReady, audioReady]);
+
+  useEffect(() => {
+    console.log(`[Scene] currentAudioTime: ${currentAudioTime?.toFixed(2)}`);
+  }, [currentAudioTime]);
 
   // --- (Removed update effect using audioMap for currentAudioTime) ---
   // Since we no longer store audio elements in audioMap, this effect has been removed.
