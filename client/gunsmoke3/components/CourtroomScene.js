@@ -429,7 +429,7 @@ export default function CourtroomScene({
       targetHead.getWorldPosition(pos);
       const pos2 = new THREE.Vector3();
       targetHead.getWorldPosition(pos2);
-      console.log("📍 Target world position for", targetId, pos2);
+      // console.log("📍 Target world position for", targetId, pos2);
 
       pos.y += 0.25;
       lookTargetRef.current.position.copy(pos);
