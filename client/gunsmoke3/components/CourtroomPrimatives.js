@@ -454,24 +454,29 @@ export const Character = forwardRef(function Character(
   useImperativeHandle(ref, () => ({
     headRef,
   }));
+  const stickyEyeTarget = useRef(new THREE.Vector3());
 
   useFrame(() => {
-    if (!params.eyeTargetRef?.current || !headRef.current) return;
+    if (!headRef.current || !params.eyeTargetRef?.current) return;
+
+    // Get the current real eye target position
+    const newTarget = new THREE.Vector3();
+    params.eyeTargetRef.current.getWorldPosition(newTarget);
+
+    // Smoothly move sticky target toward it
+    stickyEyeTarget.current.lerp(newTarget, 0.15); // ← this makes the transition smooth
 
     const headWorldPos = new THREE.Vector3();
-    const eyeTargetWorldPos = new THREE.Vector3();
-
     headRef.current.getWorldPosition(headWorldPos);
-    params.eyeTargetRef.current.getWorldPosition(eyeTargetWorldPos);
 
     const headParent = headRef.current.parent;
     if (headParent) {
-      const targetPosLocal = new THREE.Vector3();
-      headParent.worldToLocal(targetPosLocal.copy(eyeTargetWorldPos));
+      const localTarget = stickyEyeTarget.current.clone();
+      headParent.worldToLocal(localTarget);
 
-      const dx = targetPosLocal.x;
-      const dy = targetPosLocal.y;
-      const dz = targetPosLocal.z;
+      const dx = localTarget.x;
+      const dy = localTarget.y;
+      const dz = localTarget.z;
 
       const yaw = Math.atan2(dx, dz);
       const pitch = Math.atan2(dy, Math.sqrt(dx * dx + dz * dz));
@@ -487,8 +492,9 @@ export const Character = forwardRef(function Character(
       );
     }
 
+    // Pupils
     const dir = new THREE.Vector3()
-      .subVectors(eyeTargetWorldPos, headWorldPos)
+      .subVectors(stickyEyeTarget.current, headWorldPos)
       .normalize();
     const localDir = headRef.current
       .worldToLocal(headWorldPos.clone().add(dir))
@@ -508,57 +514,6 @@ export const Character = forwardRef(function Character(
 
     leftPupilRef.current?.position.set(pupilX, pupilY, 0.0005);
     rightPupilRef.current?.position.set(pupilX, pupilY, 0.0005);
-
-    const emotion = params.emotion || "neutral";
-    const baseLidY = 0.02;
-
-    const lidOffsets = {
-      neutral: 0.03,
-      angry: 0.015,
-      happy: 0.005,
-      sad: 0.07,
-      surprised: -0.01,
-      tired: 0.08,
-    };
-
-    const lidRotations = {
-      neutral: 0,
-      angry: -Math.PI / 10,
-      happy: 0,
-      sad: 0,
-      surprised: 0,
-      tired: 0,
-    };
-
-    const targetLidY = baseLidY + (lidOffsets[emotion] ?? 0);
-    const targetRotZ = lidRotations[emotion] ?? 0;
-    const lerpFactor = 0.2;
-
-    if (leftEyelidRef.current) {
-      leftEyelidRef.current.position.y = THREE.MathUtils.lerp(
-        leftEyelidRef.current.position.y,
-        targetLidY,
-        lerpFactor
-      );
-      leftEyelidRef.current.rotation.z = THREE.MathUtils.lerp(
-        leftEyelidRef.current.rotation.z,
-        targetRotZ,
-        lerpFactor
-      );
-    }
-
-    if (rightEyelidRef.current) {
-      rightEyelidRef.current.position.y = THREE.MathUtils.lerp(
-        rightEyelidRef.current.position.y,
-        targetLidY,
-        lerpFactor
-      );
-      rightEyelidRef.current.rotation.z = THREE.MathUtils.lerp(
-        rightEyelidRef.current.rotation.z,
-        -targetRotZ,
-        lerpFactor
-      );
-    }
   });
 
   const {
