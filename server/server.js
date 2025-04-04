@@ -19,11 +19,6 @@ const ffmpeg = require("fluent-ffmpeg");
 const ffmpegPath = require("@ffmpeg-installer/ffmpeg").path;
 ffmpeg.setFfmpegPath(ffmpegPath);
 
-const textToSpeech = require("@google-cloud/text-to-speech");
-const client = new textToSpeech.TextToSpeechClient();
-const { Storage } = require("@google-cloud/storage");
-const storage = new Storage();
-const GCS_BUCKET_NAME = process.env.GCS_BUCKET_NAME;
 const os = require("os");
 const path = require("path");
 const { error, log } = require("console");
@@ -39,6 +34,8 @@ const { error, log } = require("console");
 
 function setupGoogleCredentialsFromBase64() {
   const base64 = process.env.GCS_APPLICATION_CREDENTIALS_BASE64;
+  
+  
   if (!base64) {
     throw new Error("❌ Missing GCS_APPLICATION_CREDENTIALS_BASE64");
   }
@@ -53,6 +50,13 @@ function setupGoogleCredentialsFromBase64() {
 }
 
 setupGoogleCredentialsFromBase64(); // 🧠 MUST be before using any GCP clients
+
+
+const textToSpeech = require("@google-cloud/text-to-speech");
+const client = new textToSpeech.TextToSpeechClient();
+const { Storage } = require("@google-cloud/storage");
+const storage = new Storage();
+const GCS_BUCKET_NAME = process.env.GCS_BUCKET_NAME;
 
 const app = express();
 const port = 3001;
