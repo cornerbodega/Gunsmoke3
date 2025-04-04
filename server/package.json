@@ -4,6 +4,7 @@
   "main": "server.js",
   "license": "MIT",
   "dependencies": {
+    "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "@google-cloud/storage": "^7.15.2",
     "@google-cloud/text-to-speech": "^6.0.1",
     "@supabase/supabase-js": "^2.49.3",
