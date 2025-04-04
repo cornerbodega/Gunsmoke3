@@ -34,8 +34,7 @@ const { error, log } = require("console");
 
 function setupGoogleCredentialsFromBase64() {
   const base64 = process.env.GCS_APPLICATION_CREDENTIALS_BASE64;
-  
-  
+
   if (!base64) {
     throw new Error("❌ Missing GCS_APPLICATION_CREDENTIALS_BASE64");
   }
@@ -51,10 +50,10 @@ function setupGoogleCredentialsFromBase64() {
 
 setupGoogleCredentialsFromBase64(); // 🧠 MUST be before using any GCP clients
 
-
 const textToSpeech = require("@google-cloud/text-to-speech");
 const client = new textToSpeech.TextToSpeechClient();
 const { Storage } = require("@google-cloud/storage");
+const { get } = require("http");
 const storage = new Storage();
 const GCS_BUCKET_NAME = process.env.GCS_BUCKET_NAME;
 
@@ -134,7 +133,6 @@ const phonemeToViseme = {
 };
 
 const MAX_CHUNKS = 1;
-
 const textChunkSize = 7000;
 
 function splitTextByChars(text, maxChars = textChunkSize, overlap = 500) {
@@ -146,6 +144,37 @@ function splitTextByChars(text, maxChars = textChunkSize, overlap = 500) {
     i += maxChars - overlap;
   }
   return chunks;
+}
+
+/**
+ * Helper to fetch all rows for a given scene using pagination.
+ */
+async function getAllLinesForScene(sceneId) {
+  let allRows = [];
+  let from = 0;
+  const pageSize = 1000;
+  let fetchedRows = [];
+
+  do {
+    const to = from + pageSize - 1;
+    const { data, error } = await supabase
+      .from("gs3_lines")
+      .select("line_id, line_obj")
+      .eq("scene_id", sceneId)
+      .order("line_id", { ascending: true })
+      .range(from, to);
+
+    if (error) {
+      console.error("❌ Error fetching rows:", error.message);
+      break;
+    }
+    console.log(`📦 Fetched ${data.length} rows [${from}-${to}]`);
+    fetchedRows = data;
+    allRows = allRows.concat(fetchedRows);
+    from += pageSize;
+  } while (fetchedRows.length === pageSize);
+
+  return allRows;
 }
 
 app.post("/upload", upload.single("pdf"), async (req, res) => {
@@ -243,23 +272,12 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
         role: char.role,
       });
     }
-    await assignVoicesForAllSpeakers(speakerMap, openai);
+    // await assignVoicesForAllSpeakers(speakerMap, openai);
 
     console.log(
       "[INFO] Updated speaker map with cleaned characters:",
       Object.fromEntries(speakerMap)
     );
-
-    // console.log(
-    //  `👥 Final Speaker Map after cleaning: ${JSON.stringify(
-    //   Object.fromEntries(speakerMap)
-    // )}`
-    //
-    //
-
-    // console.log(
-    //   `👥 Identified ${characters.characters.length} unique speakers`
-    // );
 
     // 🧠 Process chunks
     const processedChunks = [];
@@ -299,11 +317,6 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
     let previousLines = [];
 
     for (let i = 0; i < lines.length; i++) {
-      // const match = lines[i].match(/^(.+?):\s*(.+)$/);
-      // if (!match) continue;
-
-      // const [_, speaker, text] = match;
-
       const metadata = await generateMetadataForLine({
         text: lines[i],
         previousLines,
@@ -346,16 +359,6 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
 
       return {
         ...metadata,
-        // audio_url: "audioUrl", // placeholder; your audio logic remains the same
-        // viseme_data: {
-        //   duration: 2.3,
-        //   frames: [
-        //     { time: 0.0, viseme: "rest" },
-        //     { time: 0.3, viseme: "AA" },
-        //     { time: 1.2, viseme: "N" },
-        //     { time: 2.2, viseme: "rest" },
-        //   ],
-        // },
       };
     }
 
@@ -423,8 +426,6 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
         });
 
         const content = response.choices[0].message.content.trim();
-
-        // Strip any possible markdown (just in case)
         const jsonText = content
           .replace(/^```(?:json)?\s*/i, "")
           .replace(/```$/, "")
@@ -480,7 +481,7 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
       processedChunkCount: processedChunks.length,
       numpages: parsed.numpages,
       info: parsed.info,
-      characters: Array.from(speakerMap.values()), // ✅ Replace this
+      characters: Array.from(speakerMap.values()),
       transcript: finalTranscript,
       cleanedChunks: processedChunks.map((c) => c.cleanedText),
     });
@@ -492,16 +493,9 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
 
 async function assignCharactersBatch(sceneId, knownCharacters, batchSize = 10) {
   try {
-    // Fetch all lines for the scene from Supabase
-    const { data: rows, error } = await supabase
-      .from("gs3_lines")
-      .select("line_id, line_obj")
-      .eq("scene_id", sceneId)
-      .order("line_id", { ascending: true });
+    // Fetch all lines for the scene using pagination
+    const rows = await getAllLinesForScene(sceneId);
 
-    if (error) throw new Error(error.message);
-
-    // Process lines in batches
     for (let i = 0; i < rows.length; i += batchSize) {
       const batch = rows.slice(i, i + batchSize);
 
@@ -547,7 +541,7 @@ Return only the JSON array.
         assignments = JSON.parse(content);
       } catch (parseErr) {
         console.error(
-          "Error parsing batch assignment JSON:",
+          "🚨 Error parsing batch assignment JSON:",
           parseErr,
           content
         );
@@ -561,7 +555,7 @@ Return only the JSON array.
         // Find the matching line in the batch (for logging or additional logic)
         const lineData = batch.find((r) => r.line_id === line_id);
         if (!lineData) {
-          console.warn(`No matching line found for line_id ${line_id}`);
+          console.warn(`⚠️ No matching line found for line_id ${line_id}`);
           continue;
         }
 
@@ -595,14 +589,8 @@ Return only the JSON array.
 
 async function assignZones(sceneId) {
   try {
-    const { data: rows, error } = await supabase
-      .from("gs3_lines")
-      .select("line_id, line_obj")
-      .eq("scene_id", sceneId)
-      .order("line_id", { ascending: true });
-
-    if (error) throw new Error(error.message);
-
+    // Fetch all lines using pagination
+    const rows = await getAllLinesForScene(sceneId);
     const CONTEXT_WINDOW = 15;
     const priorLines = [];
 
@@ -708,7 +696,6 @@ async function uploadToGCS(
   await file.save(buffer, {
     metadata: { contentType },
     resumable: false, // Just set the file to be uploaded
-    // Remove the legacy ACL as uniform bucket-level access is enabled
   });
 
   return `https://storage.googleapis.com/${GCS_BUCKET_NAME}/${destinationPath}`;
@@ -764,17 +751,14 @@ function alignVisemesWithTimings(text, timepoints, cmuDict) {
 
 async function generateAudioAndVisemes(sceneId) {
   try {
-    const { data: rows, error } = await supabase
-      .from("gs3_lines")
-      .select("line_id, line_obj")
-      .eq("scene_id", sceneId)
-      .order("line_id", { ascending: true });
-
-    if (error) throw new Error(error.message);
+    // Fetch all lines using pagination
+    const rows = await getAllLinesForScene(sceneId);
 
     for (const row of rows) {
       const { line_id, line_obj } = row;
       const { text, character_id } = line_obj;
+      line_obj.voice = assignVoiceForSpeaker(character_id);
+
       const voice = line_obj.voice; // ✅ already injected by metadata process
 
       // 🎙️ Generate TTS
@@ -795,7 +779,7 @@ async function generateAudioAndVisemes(sceneId) {
         viseme_data: visemeData,
       };
 
-      console.log(`gs3_lines`, updatedLineObj);
+      console.log(`gs3_lines update for line ${line_id}:`, updatedLineObj);
 
       const { error: updateErr } = await supabase
         .from("gs3_lines")
@@ -879,7 +863,7 @@ async function extractCharactersFromChunk(chunkText, speakerMap) {
     return JSON.parse(jsonText);
   } catch (error) {
     console.error(
-      "Character extraction error:",
+      "❌ Character extraction error:",
       error.response?.data || error.message
     );
     return [];
@@ -937,7 +921,10 @@ async function cleanText(chunkText, speakerMap, lastSpeaker, lastLine) {
 
     return result;
   } catch (error) {
-    console.error("GPT-4o-mini error:", error.response?.data || error.message);
+    console.error(
+      "❌ GPT-4o-mini error:",
+      error.response?.data || error.message
+    );
     throw new Error("Failed to process chunk with GPT-4o-mini");
   }
 }
@@ -998,9 +985,33 @@ function hashString(str) {
   return hash;
 }
 
-// function assignVoiceForSpeaker(speaker) {
+function assignVoiceForSpeaker(speaker) {
+  const availableVoices = [
+    "en-US-Wavenet-A",
+    "en-US-Wavenet-B",
+    // "en-US-Wavenet-C",
+    "en-US-Wavenet-D",
+    "en-US-Wavenet-E",
+    "en-US-Wavenet-F",
+    "en-US-Wavenet-G",
+    "en-US-Wavenet-H",
+  ];
+  // use ai for this! also keep a list of voices used
+  const index = Math.abs(hashString(speaker)) % availableVoices.length;
+  return availableVoices[index];
+}
+// function hashString(str) {
+//   let hash = 0;
+//   for (let i = 0; i < str.length; i++) {
+//     hash = (hash << 5) - hash + str.charCodeAt(i);
+//     hash |= 0;
+//   }
+//   return hash;
+// }
+
+// function assignVoicesForAllSpeakers(speakerMap) {
 //   const availableVoices = [
-//     "en-US-Wavenet-A",
+//     // "en-US-Wavenet-A",
 //     "en-US-Wavenet-B",
 //     "en-US-Wavenet-C",
 //     "en-US-Wavenet-D",
@@ -1008,92 +1019,32 @@ function hashString(str) {
 //     "en-US-Wavenet-F",
 //     "en-US-Wavenet-G",
 //     "en-US-Wavenet-H",
+//     "en-US-Wavenet-I",
+//     "en-US-Wavenet-J",
 //   ];
-//   // use ai for this! also keep a list of voices used
-//   const index = Math.abs(hashString(speaker)) % availableVoices.length;
-//   return availableVoices[index];
+
+//   const voiceHistory = []; // rolling window of recent voices
+//   const maxRecent = 3;
+
+//   for (const [id, character] of speakerMap.entries()) {
+//     let voice = availableVoices.find((v) => !voiceHistory.includes(v));
+
+//     if (!voice) {
+//       // fallback: use hash-based selection to keep it stable
+//       const hash = Math.abs(hashString(id));
+//       voice = availableVoices[hash % availableVoices.length];
+//     }
+
+//     // assign and update rolling history
+//     character.voice = voice;
+//     voiceHistory.push(voice);
+//     if (voiceHistory.length > maxRecent) {
+//       voiceHistory.shift(); // keep window size in check
+//     }
+//   }
+
+//   console.log("🔊 Assigned voices (spread):", Object.fromEntries(speakerMap));
 // }
-async function assignVoicesForAllSpeakers(speakerMap, openai) {
-  const wavenetVoices = {
-    male: [
-      "en-US-Wavenet-A",
-      "en-US-Wavenet-B",
-      "en-US-Wavenet-C",
-      "en-US-Wavenet-D",
-      "en-US-Wavenet-I",
-    ],
-    female: [
-      "en-US-Wavenet-E",
-      "en-US-Wavenet-F",
-      "en-US-Wavenet-G",
-      "en-US-Wavenet-H",
-      "en-US-Wavenet-J",
-    ],
-  };
-
-  const usedVoices = new Set();
-
-  const characters = Array.from(speakerMap.entries()).map(([id, data]) => ({
-    id,
-    name: data.name,
-    role: data.role,
-  }));
-
-  const prompt = `
-You are assigning AI voices to courtroom characters.
-
-Return the most likely gender for each character as "male" or "female". Make your best guess from name and role.
-
-Return JSON:
-[
-  { "id": "elizabethholmes", "gender": "female" },
-  { "id": "judgelee", "gender": "male" }
-]
-
-Characters:
-${JSON.stringify(characters, null, 2)}
-  `;
-
-  try {
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [{ role: "system", content: prompt }],
-    });
-
-    let content = response.choices[0].message.content.trim();
-    content = content
-      .replace(/^```(?:json)?/, "")
-      .replace(/```$/, "")
-      .trim();
-    const genders = JSON.parse(content);
-
-    for (const { id, gender } of genders) {
-      const voicePool =
-        gender === "female"
-          ? wavenetVoices.female
-          : gender === "male"
-          ? wavenetVoices.male
-          : [...wavenetVoices.male, ...wavenetVoices.female];
-
-      let assignedVoice = voicePool.find((v) => !usedVoices.has(v));
-      if (!assignedVoice) {
-        const hash = Math.abs(hashString(id));
-        assignedVoice = voicePool[hash % voicePool.length];
-      }
-      usedVoices.add(assignedVoice);
-
-      const character = speakerMap.get(id);
-      if (character) {
-        character.voice = assignedVoice;
-        character.gender = gender;
-      }
-    }
-
-    console.log("🔊 Assigned voices:", Object.fromEntries(speakerMap));
-  } catch (err) {
-    console.error("❌ Failed to assign voices:", err.message);
-  }
-}
 
 async function analyzeRawDocument(text) {
   const prompt = `
@@ -1116,7 +1067,7 @@ async function analyzeRawDocument(text) {
       model: "gpt-4o-mini",
       messages: [
         { role: "system", content: prompt },
-        { role: "user", content: text.slice(0, 12000) }, // safe token cap
+        { role: "user", content: text.slice(0, 12000) },
       ],
     });
 
@@ -1140,12 +1091,8 @@ async function analyzeRawDocument(text) {
 
 async function generateCharacterStyles(sceneId) {
   try {
-    const { data: rows, error } = await supabase
-      .from("gs3_lines")
-      .select("line_id, line_obj")
-      .eq("scene_id", sceneId);
-
-    if (error) throw new Error(error.message);
+    // Fetch all lines using pagination
+    const rows = await getAllLinesForScene(sceneId);
 
     // Step 1: Build set of unique character_ids
     const characterIds = new Set();
@@ -1238,9 +1185,10 @@ Character ID: ${character_id}
       skin_color: "#cccccc",
       shirt_color: "#888888",
       pants_color: "#444444",
-    }; // fallback
+    };
   }
 }
+
 app.get("/audio-proxy", async (req, res) => {
   const { url } = req.query;
   if (!url) return res.status(400).send("Missing URL");
@@ -1261,7 +1209,6 @@ app.get("/audio-proxy", async (req, res) => {
       return res.status(response.status).send("Upstream fetch failed");
     }
 
-    // Set proper headers for CORS and content-type
     res.setHeader(
       "Content-Type",
       response.headers.get("content-type") || "audio/mpeg"
@@ -1292,7 +1239,6 @@ app.get("/audio-proxy", async (req, res) => {
 app.post("/convert", upload.single("video"), (req, res) => {
   const sceneId = req.body.sceneId;
   const sessionId = req.body.sessionId;
-
   const line_id = req.body.line_id;
   const folderName = `${sessionId}-${sceneId}`;
   const folderPath = path.join(__dirname, "videos", folderName);
@@ -1302,28 +1248,19 @@ app.post("/convert", upload.single("video"), (req, res) => {
   }
 
   const inputPath = req.file.path;
-
   const outputFileName = `${line_id}.mp4`;
-
   const outputPath = path.join(folderPath, outputFileName);
 
-  // Ensure folder exists
   if (!fs.existsSync(folderPath)) {
     fs.mkdirSync(folderPath, { recursive: true });
   }
 
-  // Check input file before proceeding
   if (!fs.existsSync(inputPath)) {
     console.error("❌ Input file missing:", inputPath);
     return res.status(400).send("Missing uploaded file.");
   }
 
   const stats = fs.statSync(inputPath);
-  // if (stats.size < 1000) {
-  //   console.error("❌ Input file is too small (likely corrupt):", inputPath);
-  //   fs.unlinkSync(inputPath);
-  //   return res.status(400).send("Uploaded file is empty or corrupt.");
-  // }
 
   console.log(
     `📹 Converting ${inputPath} (${(stats.size / 1024 / 1024).toFixed(
@@ -1335,7 +1272,7 @@ app.post("/convert", upload.single("video"), (req, res) => {
     .inputFormat("webm")
     .videoCodec("libx264")
     .audioCodec("aac")
-    .videoFilters("scale=ceil(iw/2)*2:ceil(ih/2)*2") // 👈 FIX
+    .videoFilters("scale=ceil(iw/2)*2:ceil(ih/2)*2")
     .outputOptions(["-movflags +faststart", "-pix_fmt yuv420p", "-r 30"])
     .on("start", (cmd) => console.log("🎬 FFmpeg started:", cmd))
     .on("stderr", (line) => console.log("🧪 FFmpeg stderr:", line))
