@@ -454,17 +454,42 @@ export const Character = forwardRef(function Character(
   useImperativeHandle(ref, () => ({
     headRef,
   }));
+
   const stickyEyeTarget = useRef(new THREE.Vector3());
 
-  useFrame(() => {
-    if (!headRef.current || !params.eyeTargetRef?.current) return;
+  // Eyelid parameters for different emotions (height and rotation)
+  // Adjust these values as needed
+  const eyelidParamsByEmotion = {
+    neutral: { height: 0.02, rotation: 0 },
+    defensive: { height: -0.001, rotation: -0.25 },
+    confident: { height: 0.06, rotation: -0.05 },
+    confused: { height: 0.025, rotation: 0.05 },
+    angry: { height: -0.005, rotation: -0.2 },
+    nervous: { height: 0.03, rotation: 0.2 },
+    tense: { height: 0.05, rotation: 0.2 },
+  };
+  useEffect(() => {
+    // console.log(
+    //   `Character ${params.characterId} emotion changed to:`,
+    //   params.emotion
+    // );
+  }, [params.emotion]);
 
+  useFrame(() => {
+    if (!headRef.current) return;
+
+    const isSpeaking = params.activeSpeakerId === params.characterId;
+    const targetRef = isSpeaking
+      ? params.speakerTargetRef
+      : params.eyeTargetRef;
+
+    if (!targetRef?.current) return;
     // Get the current real eye target position
     const newTarget = new THREE.Vector3();
-    params.eyeTargetRef.current.getWorldPosition(newTarget);
+    targetRef.current.getWorldPosition(newTarget);
 
     // Smoothly move sticky target toward it
-    stickyEyeTarget.current.lerp(newTarget, 0.15); // ← this makes the transition smooth
+    stickyEyeTarget.current.lerp(newTarget, 0.15);
 
     const headWorldPos = new THREE.Vector3();
     headRef.current.getWorldPosition(headWorldPos);
@@ -514,6 +539,36 @@ export const Character = forwardRef(function Character(
 
     leftPupilRef.current?.position.set(pupilX, pupilY, 0.0005);
     rightPupilRef.current?.position.set(pupilX, pupilY, 0.0005);
+
+    // Animate eyelid height and rotation based on emotion
+    if (leftEyelidRef.current && rightEyelidRef.current) {
+      const paramsForEmotion =
+        eyelidParamsByEmotion[params.emotion] || eyelidParamsByEmotion.neutral;
+      const targetY = paramsForEmotion.height;
+      const targetRot = paramsForEmotion.rotation;
+
+      leftEyelidRef.current.position.y = THREE.MathUtils.lerp(
+        leftEyelidRef.current.position.y,
+        targetY,
+        0.1
+      );
+      rightEyelidRef.current.position.y = THREE.MathUtils.lerp(
+        rightEyelidRef.current.position.y,
+        targetY,
+        0.1
+      );
+      leftEyelidRef.current.rotation.z = THREE.MathUtils.lerp(
+        leftEyelidRef.current.rotation.z,
+        targetRot,
+        0.1
+      );
+      // Mirror rotation for right eyelid
+      rightEyelidRef.current.rotation.z = THREE.MathUtils.lerp(
+        rightEyelidRef.current.rotation.z,
+        -targetRot,
+        0.1
+      );
+    }
   });
 
   const {

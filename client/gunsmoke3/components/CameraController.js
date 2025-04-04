@@ -1,13 +1,13 @@
-// components/CameraController.jsx
 import { useThree, useFrame } from "@react-three/fiber";
-import { useEffect, useRef, useMemo } from "react";
+import { useEffect, useRef, useMemo, useState } from "react";
 import * as THREE from "three";
 
 export default function CameraController({ activePreset }) {
   const { camera } = useThree();
   const cameraTarget = useRef(new THREE.Vector3());
 
-  // Updated camera presets with new bailiff_reaction and added clerk_view
+  const [manualOverride, setManualOverride] = useState(false);
+
   const cameraPresets = useMemo(
     () => ({
       wide_establishing: {
@@ -16,7 +16,7 @@ export default function CameraController({ activePreset }) {
       },
       crossExaminationFromWell: {
         position: new THREE.Vector3(-17, 4, -10.5),
-        lookAt: new THREE.Vector3(0, 3, -10),
+        lookAt: new THREE.Vector3(0, 3, -9),
       },
       judge_closeup: {
         position: new THREE.Vector3(0, 8, -10),
@@ -35,12 +35,10 @@ export default function CameraController({ activePreset }) {
         lookAt: new THREE.Vector3(4.5, 2.5, -0.5),
       },
       bailiff_reaction: {
-        // New bailiff location near the witness
         position: new THREE.Vector3(-8, 3, 0),
         lookAt: new THREE.Vector3(-11, 2.5, -15),
       },
       clerk_view: {
-        // Clerk now occupies the former bailiff position
         position: new THREE.Vector3(9, 3, -6),
         lookAt: new THREE.Vector3(8, 2.5, -12),
       },
@@ -56,13 +54,16 @@ export default function CameraController({ activePreset }) {
   const current = useRef(presetNames.indexOf(activePreset) || 0);
 
   useEffect(() => {
-    current.current = presetNames.indexOf(activePreset);
-  }, [activePreset, presetNames]);
+    if (!manualOverride) {
+      current.current = presetNames.indexOf(activePreset);
+    }
+  }, [activePreset, presetNames, manualOverride]);
 
   useEffect(() => {
     const handleKey = (e) => {
       if (e.key.toLowerCase() === "c") {
         current.current = (current.current + 1) % presetNames.length;
+        setManualOverride(true); // 🔥 Activate manual override
         console.log("📷 Manual camera angle:", presetNames[current.current]);
       }
     };
@@ -74,8 +75,8 @@ export default function CameraController({ activePreset }) {
     const target =
       cameraPresets[presetNames[current.current]] ||
       cameraPresets["wide_establishing"];
-    camera.position.copy(target.position); // Instant jump to new position
-    camera.lookAt(target.lookAt); // Instant jump to new lookAt
+    camera.position.copy(target.position);
+    camera.lookAt(target.lookAt);
   });
 
   return null;

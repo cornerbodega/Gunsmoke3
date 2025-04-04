@@ -13,7 +13,6 @@ import React, {
 } from "react";
 import * as THREE from "three";
 import CameraController from "@/components/CameraController";
-import { getSupabase } from "@/utils/supabase";
 import {
   Floor,
   Ceiling,
@@ -40,6 +39,8 @@ export default function CourtroomScene({
   startFromLineId = 1,
 }) {
   const sessionId = useMemo(() => uuidv4(), []);
+  // Proxy that supports resolving aliases seamlessly
+
   const startFromIndex = useMemo(() => {
     if (!startFromLineId) return 0;
     const index = lines.findIndex((line) => line.line_id === startFromLineId);
@@ -47,18 +48,46 @@ export default function CourtroomScene({
   }, [startFromLineId, lines]);
 
   const [currentIndex, setCurrentIndex] = useState(-1);
-
   const [activeSpeakerId, setActiveSpeakerId] = useState(null);
   // State to track the audio's current time for viseme timing.
   const [currentAudioTime, setCurrentAudioTime] = useState(0);
+  // Optional: dynamically build from your lines if you want
+  const aliasMap = useMemo(() => {
+    const map = {
+      prosecutor: "prosecutor1",
+      prosecutor2: "prosecutor1",
+      defense: "defense1",
+
+      jury: "jury-2",
+    };
+
+    lines.forEach(({ line_obj }) => {
+      const { role, character_id } = line_obj;
+      if (role && character_id && !map[role]) {
+        map[role] = character_id;
+      }
+    });
+
+    return map;
+  }, [lines]);
+
   const characterRefs = useRef({});
-  // (Removed audioMap since we no longer preload thousands of audio files)
+  const resolvedCharacterRefs = useResolvedCharacterRefs(
+    characterRefs,
+    aliasMap
+  );
+
   // Shared lookTargetRef for non‑speakers and active speaker target
   const lookTargetRef = useRef(new THREE.Object3D());
   const speakerTargetRef = useRef(new THREE.Object3D());
   const [ready, setReady] = useState(false);
   const [headRefsReady, setHeadRefsReady] = useState(false);
   const [autoPlay, setAutoPlay] = useState(false);
+
+  function resolveCharacterId(id) {
+    // Return the canonical character ID (characterId > role > alias fallback)
+    return aliasMap[id] || id;
+  }
 
   // --- Recording Setup Refs ---
   const canvasRef = useRef(null);
@@ -80,12 +109,21 @@ export default function CourtroomScene({
   // This ensures that the browser allows audio playback.
   useEffect(() => {
     const handleUserInteraction = () => {
+      // Only play ding if we haven’t already marked audio as ready
+      if (!audioReady) {
+        const ding = new Audio("/ready-sound.mp3");
+        ding
+          .play()
+          .catch((e) => console.warn("🔇 Could not play ready sound:", e));
+      }
+
       setAudioReady(true);
       window.removeEventListener("click", handleUserInteraction);
     };
+
     window.addEventListener("click", handleUserInteraction);
     return () => window.removeEventListener("click", handleUserInteraction);
-  }, []);
+  }, [audioReady]);
 
   // --- Helper: playLineAudio ---
   // Loads a single audio clip, routes it to the recording destination,
@@ -181,7 +219,7 @@ export default function CourtroomScene({
         formData.append("sceneId", sceneId);
 
         try {
-          await fetch("http://localhost:3001/convert", {
+          fetch("http://localhost:3001/convert", {
             method: "POST",
             body: formData,
           });
@@ -238,59 +276,6 @@ export default function CourtroomScene({
     });
   };
 
-  // --- Start Recording Function ---
-  // const startRecording = () => {
-  //   if (!canvasRef.current || !audioDestRef.current) return;
-  //   // Capture the canvas at 60 fps (ensure preserveDrawingBuffer is enabled)
-  //   const canvasStream = canvasRef.current.captureStream(60);
-  //   // Get the audio stream from our MediaStreamDestination.
-  //   const audioStream = audioDestRef.current.stream;
-  //   // Combine video and audio tracks.
-  //   const combinedStream = new MediaStream([
-  //     ...canvasStream.getTracks(),
-  //     ...audioStream.getTracks(),
-  //   ]);
-  //   mediaRecorder.current = new MediaRecorder(combinedStream, {
-  //     mimeType: "video/webm; codecs=vp9",
-  //   });
-  //   mediaRecorder.current.ondataavailable = (event) => {
-  //     if (event.data.size > 0) {
-  //       recordedChunks.current.push(event.data);
-  //     }
-  //   };
-  //   mediaRecorder.current.onstop = () => {
-  //     const blob = new Blob(recordedChunks.current, { type: "video/webm" });
-  //     const formData = new FormData();
-  //     formData.append("video", blob, "scene.webm");
-  //     formData.append("sessionId", sessionId);
-
-  //     // add sceneId to formData
-
-  //     fetch("http://localhost:3001/convert", {
-  //       method: "POST",
-  //       body: formData,
-  //     })
-  //       .then(async (res) => {
-  //         const blob = await res.blob();
-  //         const url = URL.createObjectURL(blob);
-  //         const link = document.createElement("a");
-  //         link.href = url;
-  //         link.download = "scene.mp4";
-  //         document.body.appendChild(link);
-  //         link.click();
-  //         document.body.removeChild(link);
-  //         URL.revokeObjectURL(url);
-  //         console.log("✅ MP4 downloaded");
-  //       })
-  //       .catch((err) => {
-  //         console.error("❌ Upload or conversion failed:", err);
-  //       });
-  //   };
-
-  //   mediaRecorder.current.start();
-  //   console.log("Recording started.");
-  // };
-
   // --- Key Handler for Start Recording & Serial Playback ---
   useEffect(() => {
     const handleKeyDown = async (e) => {
@@ -322,13 +307,9 @@ export default function CourtroomScene({
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [currentIndex, lines, headRefsReady, audioReady]);
 
-  useEffect(() => {
-    console.log(`[Scene] currentAudioTime: ${currentAudioTime?.toFixed(2)}`);
-  }, [currentAudioTime]);
-
-  // --- (Removed update effect using audioMap for currentAudioTime) ---
-  // Since we no longer store audio elements in audioMap, this effect has been removed.
-  // If needed, you could implement a separate mechanism to track the currently playing audio.
+  // useEffect(() => {
+  //   console.log(`[Scene] currentAudioTime: ${currentAudioTime?.toFixed(2)}`);
+  // }, [currentAudioTime]);
 
   // --- One-Time Update on New Line (unchanged) ---
   useEffect(() => {
@@ -341,13 +322,13 @@ export default function CourtroomScene({
     );
     let speakerHead = null;
     let targetHead = null;
-    if (speakerId && characterRefs.current[speakerId]?.headRef) {
-      speakerHead = characterRefs.current[speakerId].headRef;
+    if (speakerId && resolvedCharacterRefs[speakerId]?.headRef) {
+      speakerHead = resolvedCharacterRefs[speakerId].headRef;
     } else {
       console.warn(`Speaker head not found for id: ${speakerId}`);
     }
-    if (targetId && characterRefs.current[targetId]?.headRef) {
-      targetHead = characterRefs.current[targetId].headRef;
+    if (targetId && resolvedCharacterRefs[targetId]?.headRef) {
+      targetHead = resolvedCharacterRefs[targetId].headRef;
     } else {
       console.warn(`Target head not found for id: ${targetId}`);
     }
@@ -357,9 +338,16 @@ export default function CourtroomScene({
         `Speaker ${speakerId} is targeting themselves. Using fallback.`
       );
       targetHead = currentLine.eye_target
-        ? characterRefs.current[currentLine.eye_target]?.headRef
+        ? resolvedCharacterRefs[currentLine.eye_target]?.headRef
         : null;
     }
+    if (!targetHead && targetId) {
+      console.warn(`❗ No head found for targetId: "${targetId}"`);
+    }
+
+    console.log("Looking for target head by role:", targetId);
+    console.log("Found target head:", resolvedCharacterRefs[targetId]?.headRef);
+
     // Update shared look target for non‑speakers.
     if (speakerHead) {
       const pos = new THREE.Vector3();
@@ -377,9 +365,9 @@ export default function CourtroomScene({
       console.log(
         `Speaker ${speakerId} has no valid target. Falling back to judge.`
       );
-      if (characterRefs.current["judge"]?.headRef) {
+      if (resolvedCharacterRefs["judge"]?.headRef) {
         const pos3 = new THREE.Vector3();
-        characterRefs.current["judge"].headRef.getWorldPosition(pos3);
+        resolvedCharacterRefs["judge"].headRef.getWorldPosition(pos3);
         pos3.y += 0.25;
         speakerTargetRef.current.position.copy(pos3);
         console.log(`Speaker ${speakerId} falling back to judge as target.`);
@@ -395,15 +383,15 @@ export default function CourtroomScene({
       if (!currentLine) return;
       const speakerId = currentLine.character_id;
       const targetId = currentLine.eye_target;
-      const speakerObj = characterRefs.current[speakerId];
+      const speakerObj = resolvedCharacterRefs[speakerId];
       if (speakerObj && speakerObj.headRef) {
         const pos = new THREE.Vector3();
         speakerObj.headRef.getWorldPosition(pos);
         lookTargetRef.current.position.copy(pos);
       }
       const targetObj =
-        (targetId && characterRefs.current[targetId]) ||
-        characterRefs.current["judge"];
+        (targetId && resolvedCharacterRefs[targetId]) ||
+        resolvedCharacterRefs["judge"];
       if (speakerObj && targetObj && targetObj.headRef) {
         const pos2 = new THREE.Vector3();
         targetObj.headRef.getWorldPosition(pos2);
@@ -422,9 +410,9 @@ export default function CourtroomScene({
   // --- Register Character Head Refs ---
   const registerCharacter = (id, headRef, role) => {
     if (headRef?.current) {
-      characterRefs.current[id] = { headRef: headRef.current };
-      if (role && role !== id) {
-        characterRefs.current[role] = { headRef: headRef.current };
+      resolvedCharacterRefs[id] = { headRef: headRef.current };
+      if (role) {
+        resolvedCharacterRefs[role] = { headRef: headRef.current };
       }
       if (id === "judge" || role === "judge") {
         setHeadRefsReady(true);
@@ -435,10 +423,14 @@ export default function CourtroomScene({
   // --- Default lookTarget when scene is not playing ---
   useEffect(() => {
     if (currentIndex !== -1 || !headRefsReady) return;
-    const targetHead = characterRefs.current["prosecutor1"]?.headRef;
+    const targetHead = resolvedCharacterRefs["prosecutor1"]?.headRef;
     if (targetHead) {
       const pos = new THREE.Vector3();
       targetHead.getWorldPosition(pos);
+      const pos2 = new THREE.Vector3();
+      targetHead.getWorldPosition(pos2);
+      console.log("📍 Target world position for", targetId, pos2);
+
       pos.y += 0.25;
       lookTargetRef.current.position.copy(pos);
     }
@@ -484,69 +476,6 @@ export default function CourtroomScene({
   const getLocationPose = (key) =>
     zoneMap[key] || { position: [0, 0, 0], rotation: [0, 0, 0] };
 
-  // --- Main Characters ---
-  const mainCharacters = [
-    {
-      id: "judge",
-      zone: "judge_sitting_at_judge_bench",
-      role: "judge",
-      sitting: true,
-      colorTorso: "#222",
-      emotion: "angry",
-    },
-    {
-      id: "prosecutor1",
-      zone: "prosecutor_at_witness_stand",
-      role: "prosecutor1",
-      sitting: false,
-      colorTorso: "#1e90ff",
-    },
-    {
-      id: "prosecutor2",
-      zone: "prosecutor_table_right",
-      role: "prosecutor2",
-      sitting: true,
-      colorTorso: "#1e90ff",
-    },
-    {
-      id: "defense1",
-      zone: "defense_table_left",
-      role: "defense1",
-      sitting: true,
-      colorTorso: "#32cd32",
-    },
-    {
-      id: "defense2",
-      zone: "defense_table_right",
-      role: "defense2",
-      sitting: true,
-      colorTorso: "#32cd32",
-    },
-    {
-      id: "witness",
-      zone: "witness_at_witness_stand",
-      role: "witness",
-      sitting: true,
-      colorTorso: "#ffd700",
-    },
-    {
-      id: "stenographer",
-      zone: "stenographer_station",
-      role: "stenographer",
-      sitting: true,
-      colorTorso: "#9932cc",
-    },
-    {
-      id: "clerk", // New clerk character
-      zone: "clerk_box",
-      role: "clerk",
-      sitting: true,
-      colorTorso: "#a0522d",
-    },
-  ];
-
-  // Get the current active line, if any.
-  const currentLine = currentIndex !== -1 ? lines[currentIndex].line_obj : null;
   // Build mapping of character id to their specified style.
   const characterStyleMapping = useMemo(() => {
     const mapping = {};
@@ -573,13 +502,6 @@ export default function CourtroomScene({
         pants_color: "#000000",
         shirt_color: "#222222",
       },
-      // jury: {
-      //   hair_color: "#4b4b4b",
-      //   hair_style: "bald",
-      //   skin_color: "#e1b7a1",
-      //   pants_color: "#2e2e2e",
-      //   shirt_color: "#8b4513",
-      // },
       bailiff: {
         hair_color: "#000000",
         hair_style: "bald",
@@ -601,6 +523,12 @@ export default function CourtroomScene({
     const fallbackStyle = generateDeterministicStyle(id);
     return fallbackStyle;
   };
+  useEffect(() => {
+    if (currentIndex !== -1) {
+      const currentLine = lines[currentIndex].line_obj;
+      console.log("Active emotion:", currentLine.emotion);
+    }
+  }, [currentIndex, lines]);
 
   const generateDeterministicStyle = (id) => {
     const palette = {
@@ -800,6 +728,10 @@ export default function CourtroomScene({
                             eyeTargetRef: lookTargetRef,
                             speakerTargetRef,
                             activeSpeakerId,
+                            emotion: isActive
+                              ? lines[currentIndex].line_obj.emotion ||
+                                "neutral"
+                              : "neutral",
                           }}
                         />
                       );
@@ -822,6 +754,7 @@ export default function CourtroomScene({
                     eyeTargetRef: lookTargetRef,
                     speakerTargetRef,
                     activeSpeakerId,
+                    emotion: "angry",
                   }}
                 />
 
@@ -840,6 +773,7 @@ export default function CourtroomScene({
                     eyeTargetRef: lookTargetRef,
                     speakerTargetRef,
                     activeSpeakerId,
+                    emotion: "neutral",
                   }}
                 />
 
@@ -858,6 +792,7 @@ export default function CourtroomScene({
                     eyeTargetRef: lookTargetRef,
                     speakerTargetRef,
                     activeSpeakerId,
+                    emotion: "neutral",
                   }}
                 />
 
@@ -869,7 +804,11 @@ export default function CourtroomScene({
                     position={[18, 0, -13 + i * 1.3]}
                     rotation={[0, Math.PI / 2, 0]}
                     onReady={(headRef) =>
-                      registerCharacter(`jury-${i}`, headRef, "jury")
+                      registerCharacter(
+                        `jury-${i}`,
+                        headRef,
+                        i === 2 ? "jury" : null
+                      )
                     }
                     params={{
                       sitting: true,
@@ -879,6 +818,7 @@ export default function CourtroomScene({
                       eyeTargetRef: lookTargetRef,
                       speakerTargetRef,
                       activeSpeakerId,
+                      emotion: "neutral",
                     }}
                   />
                 ))}
@@ -898,6 +838,7 @@ export default function CourtroomScene({
                   activeSpeakerId,
                   speakerTargetRef,
                   characterId: "bailiff",
+                  emotion: "neutral",
                 }}
               />
             </group>
@@ -931,6 +872,7 @@ export default function CourtroomScene({
                         `audience-${x}-${z}`,
                         "audience"
                       ),
+                      emotion: "neutral",
                     }}
                   />
                 );
@@ -961,4 +903,15 @@ function hashStringToColor(str) {
     color += ("00" + value.toString(16)).slice(-2);
   }
   return color;
+}
+
+function useResolvedCharacterRefs(rawRef, aliasMap) {
+  return useMemo(() => {
+    return new Proxy(rawRef.current, {
+      get(target, key) {
+        const resolved = aliasMap[key] || key;
+        return target[resolved];
+      },
+    });
+  }, [aliasMap]);
 }

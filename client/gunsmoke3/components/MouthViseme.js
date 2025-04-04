@@ -9,15 +9,35 @@ export default function MouthViseme({
 }) {
   const mouthRef = useRef();
   const { camera } = useThree();
+  const [lastViseme, setLastViseme] = useState(null);
+  const [lastTextureKey, setLastTextureKey] = useState("rest");
 
   // Load and map textures
   const texturePaths = {
-    E: "/mouth_visemes/E1.png",
-    F: "/mouth_visemes/F1.png",
-    M: "/mouth_visemes/M1.png",
-    O: "/mouth_visemes/O1.png",
-    S: "/mouth_visemes/S1.png",
+    AA: "/mouth_visemes/v3/AA.png",
+    AE: "/mouth_visemes/v3/AE.png",
+    AH: "/mouth_visemes/v3/AH.png",
+    AY: "/mouth_visemes/v3/AY.png",
+    EH: "/mouth_visemes/v3/EH.png",
+    ER: "/mouth_visemes/v3/ER.png",
+    EY: "/mouth_visemes/v3/EY.png",
+    IH: "/mouth_visemes/v3/IH.png",
+    IY: "/mouth_visemes/v3/IY.png",
+    AO: "/mouth_visemes/v3/AO.png",
+    AW: "/mouth_visemes/v3/AW.png",
+    O: "/mouth_visemes/v3/O.png",
+    OW: "/mouth_visemes/v3/OW.png",
+    UH: "/mouth_visemes/v3/UH.png",
+    UW: "/mouth_visemes/v3/UW.png",
+    M: "/mouth_visemes/v3/M.png",
+    F: "/mouth_visemes/v3/F.png",
+    TH: "/mouth_visemes/v3/TH.png",
+    L: "/mouth_visemes/v3/L.png",
+    S: "/mouth_visemes/v3/S.png",
+    W: "/mouth_visemes/v3/W.png",
+    rest: "/mouth_visemes/v3/rest.png",
   };
+
   const textureKeys = Object.keys(texturePaths);
   const textureUrls = Object.values(texturePaths);
   const loadedTextures = useLoader(THREE.TextureLoader, textureUrls);
@@ -38,40 +58,56 @@ export default function MouthViseme({
     return map;
   }, [loadedTextures]);
 
-  const visemeToTextureKey = {
-    AA: "E",
-    AE: "E",
-    AH: "E",
-    AY: "E",
-    EH: "E",
-    ER: "E",
-    EY: "E",
-    IH: "E",
-    IY: "E",
-    O: "O",
-    AO: "O",
-    AW: "O",
-    OW: "O",
-    UH: "O",
-    UW: "O",
-    S: "S",
-    Z: "S",
-    SH: "S",
-    ZH: "S",
-    TH: "S",
-    DH: "S",
-    M: "M",
-    B: "M",
-    P: "M",
-    F: "F",
-    V: "F",
-    T: "E",
-    D: "E",
-    K: "E",
-    G: "E",
-    N: "E",
-    L: "E",
-    rest: "M",
+  const visemeToTextureKeys = {
+    A: ["AA", "AE", "AH", "AY"],
+    AA: ["AA"],
+    AE: ["AE"],
+    AH: ["AH"],
+    AY: ["AY"],
+
+    E: ["EH", "ER", "EY", "IH", "IY"],
+    EH: ["EH"],
+    ER: ["ER"],
+    EY: ["EY"],
+    IH: ["IH"],
+    IY: ["IY"],
+
+    O: ["AO", "AW", "O", "OW"],
+    AO: ["AO"],
+    AW: ["AW"],
+    O_: ["O"],
+    OW: ["OW"],
+
+    U: ["UH", "UW"],
+    UH: ["UH"],
+    UW: ["UW"],
+
+    M: ["M"],
+    B: ["M"],
+    P: ["M"],
+    F: ["F"],
+    V: ["F"],
+    TH: ["TH"],
+    DH: ["TH"],
+    S: ["S"],
+    Z: ["S"],
+    SH: ["S"],
+    ZH: ["S"],
+    CH: ["S"],
+    JH: ["S"],
+    L: ["L"],
+    W: ["W"],
+    R: ["ER"],
+    N: ["IH"],
+    NG: ["IH"], // approximation
+    T: ["EH"],
+    D: ["EH"],
+    K: ["EH"],
+    G: ["EH"],
+    Y: ["EY"],
+    HH: ["rest"],
+    sil: ["rest"],
+    rest: ["rest"],
   };
 
   const [currentTexture, setCurrentTexture] = useState(textureMap.M || null);
@@ -89,36 +125,35 @@ export default function MouthViseme({
       const frame = visemeData.frames[i];
       const next = visemeData.frames[i + 1];
       if (time >= frame.time && (!next || time < next.time)) {
+        // console.log(`Viseme at ${time}: ${frame.viseme}`);
+
         return frame.viseme;
       }
     }
     return "rest";
   };
 
-  useFrame(() => {
-    console.log(`[Mouth] audioTime: ${audioTime?.toFixed(2)}`);
-  });
-  
-  useFrame(() => {
-    // === Update viseme texture ===
-    console.log(`[MouthViseme] audioTime: ${audioTime?.toFixed(2)}`);
+  //   useFrame(() => {
+  //     console.log(`[Mouth] audioTime: ${audioTime?.toFixed(2)}`);
+  //   });
 
+  useFrame(() => {
     const viseme = getVisemeForTime(audioTime ?? 0);
-    console.log(`[MouthViseme] viseme: ${viseme}`);
 
-    // console.log(`${JSON.stringify(viseme)}`)
-    const textureKey = visemeToTextureKey[viseme] || "E";
-    console.log(`[MouthViseme] textureKey: ${textureKey}`);
+    if (viseme !== lastViseme) {
+      const options = visemeToTextureKeys[viseme] || ["rest"];
+      const chosenKey = options[Math.floor(Math.random() * options.length)];
 
-    const nextTexture = textureMap[textureKey] || textureMap.M;
-    if (nextTexture !== currentTexture) {
-
-      setCurrentTexture(nextTexture);
-      console.log(`Setting texture`);
-      
+      setLastViseme(viseme);
+      setLastTextureKey(chosenKey);
     }
 
-    // === Flip mouth based on camera position ===
+    const nextTexture = textureMap[lastTextureKey] || textureMap["rest"];
+    if (nextTexture !== currentTexture) {
+      setCurrentTexture(nextTexture);
+    }
+
+    // Flip based on camera position
     if (mouthRef.current?.parent) {
       const localCamPos = mouthRef.current.parent.worldToLocal(
         camera.position.clone()

@@ -1314,11 +1314,11 @@ app.post("/convert", upload.single("video"), (req, res) => {
   }
 
   const stats = fs.statSync(inputPath);
-  if (stats.size < 1000) {
-    console.error("❌ Input file is too small (likely corrupt):", inputPath);
-    fs.unlinkSync(inputPath);
-    return res.status(400).send("Uploaded file is empty or corrupt.");
-  }
+  // if (stats.size < 1000) {
+  //   console.error("❌ Input file is too small (likely corrupt):", inputPath);
+  //   fs.unlinkSync(inputPath);
+  //   return res.status(400).send("Uploaded file is empty or corrupt.");
+  // }
 
   console.log(
     `📹 Converting ${inputPath} (${(stats.size / 1024 / 1024).toFixed(
