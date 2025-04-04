@@ -1201,7 +1201,7 @@ app.post("/convert", upload.single("video"), (req, res) => {
   // Expect sceneId in the form data
   const sceneId = req.body.sceneId;
   const sessionId = req.body.sessionId;
-  const segmentIndex = req.body.segmentIndex;
+  const line_id = req.body.line_id;
   const folderName = `${sessionId}-${sceneId}`;
   const folderPath = path.join(__dirname, "videos", folderName);
 
@@ -1211,7 +1211,7 @@ app.post("/convert", upload.single("video"), (req, res) => {
   }
 
   const inputPath = req.file.path;
-  const outputFileName = `${segmentIndex}.mp4`;
+  const outputFileName = `${line_id}.mp4`;
   const outputPath = path.join(folderPath, outputFileName);
 
   console.log(`Converting ${inputPath} to ${outputPath}`);

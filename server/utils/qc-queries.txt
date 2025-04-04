@@ -1,0 +1,117 @@
+-- Check for Voice Change
+-- SELECT
+--   scene_id,
+--   line_obj->>'character_id' AS character_id,
+--   COUNT(DISTINCT line_obj->>'voice') AS unique_voice_count
+-- FROM
+--   gs3_lines
+-- WHERE
+--   line_obj ? 'voice'
+--   AND line_obj ? 'character_id'
+-- GROUP BY
+--   scene_id,
+--   line_obj->>'character_id'
+-- HAVING
+--   COUNT(DISTINCT line_obj->>'voice') > 1;
+
+-- Duplicate Characters
+-- SELECT
+--   scene_id,
+--   line_obj->>'role' AS role,
+--   COUNT(DISTINCT line_obj->>'character_id') AS num_characters
+-- FROM
+--   gs3_lines
+-- WHERE
+--   line_obj ? 'role'
+--   AND line_obj ? 'character_id'
+-- GROUP BY
+--   scene_id,
+--   line_obj->>'role'
+-- HAVING
+--   COUNT(DISTINCT line_obj->>'character_id') > 1;
+
+-- Duplicate Judge or Witness
+-- SELECT
+--   scene_id,
+--   line_obj->>'role' AS role,
+--   COUNT(DISTINCT line_obj->>'character_id') AS num_characters
+-- FROM
+--   gs3_lines
+-- WHERE
+--   line_obj->>'role' IN ('witness', 'judge')
+--   AND line_obj ? 'character_id'
+-- GROUP BY
+--   scene_id,
+--   line_obj->>'role'
+-- HAVING
+--   COUNT(DISTINCT line_obj->>'character_id') > 1;
+
+-- Find Character Role Changes
+-- WITH ordered_witness_lines AS (
+--   SELECT
+--     scene_id,
+--     line_id,
+--     line_obj->>'character_id' AS character_id,
+--     LAG(line_obj->>'character_id') OVER (
+--       PARTITION BY scene_id
+--       ORDER BY line_id
+--     ) AS prev_character_id
+--   FROM
+--     gs3_lines
+--   WHERE
+--     line_obj->>'role' = 'witness'
+--     AND line_obj ? 'character_id'
+-- )
+
+-- SELECT *
+-- FROM ordered_witness_lines
+-- WHERE character_id IS DISTINCT FROM prev_character_id
+--   AND prev_character_id IS NOT NULL;
+
+-- Find Witness Role Interruptions
+-- WITH witness_lines AS (
+--   SELECT
+--     scene_id,
+--     line_id,
+--     line_obj->>'character_id' AS character_id
+--   FROM gs3_lines
+--   WHERE
+--     line_obj->>'role' = 'witness'
+--     AND line_obj ? 'character_id'
+-- ),
+
+-- -- Group uninterrupted speaking runs
+-- runs_tagged AS (
+--   SELECT *,
+--     ROW_NUMBER() OVER (PARTITION BY scene_id ORDER BY line_id) -
+--     ROW_NUMBER() OVER (PARTITION BY scene_id, character_id ORDER BY line_id) AS run_group
+--   FROM witness_lines
+-- ),
+
+-- -- Reduce to unique runs
+-- runs AS (
+--   SELECT
+--     scene_id,
+--     character_id,
+--     MIN(line_id) AS start_line,
+--     MAX(line_id) AS end_line,
+--     COUNT(*) AS num_lines
+--   FROM runs_tagged
+--   GROUP BY scene_id, character_id, run_group
+-- ),
+
+-- -- Add speaker before and after
+-- runs_with_context AS (
+--   SELECT *,
+--     LAG(character_id) OVER (PARTITION BY scene_id ORDER BY start_line) AS prev_character,
+--     LEAD(character_id) OVER (PARTITION BY scene_id ORDER BY start_line) AS next_character
+--   FROM runs
+-- )
+
+-- -- Simple scoring logic: short interruption between repeated speakers
+-- SELECT *
+-- FROM runs_with_context
+-- WHERE num_lines <= 2
+--   AND character_id IS DISTINCT FROM prev_character
+--   AND prev_character = next_character
+-- ORDER BY scene_id, start_line;

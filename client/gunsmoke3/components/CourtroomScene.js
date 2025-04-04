@@ -34,10 +34,20 @@ import {
   Character, // make sure this Character includes your MouthViseme rendering
 } from "@/components/CourtroomPrimatives";
 
-export default function CourtroomScene({ lines, sceneId }) {
+export default function CourtroomScene({
+  lines,
+  sceneId,
+  startFromLineId = 1,
+}) {
   const sessionId = useMemo(() => uuidv4(), []);
+  const startFromIndex = useMemo(() => {
+    if (!startFromLineId) return 0;
+    const index = lines.findIndex((line) => line.line_id === startFromLineId);
+    return index === -1 ? 0 : index;
+  }, [startFromLineId, lines]);
 
   const [currentIndex, setCurrentIndex] = useState(-1);
+
   const [activeSpeakerId, setActiveSpeakerId] = useState(null);
   // State to track the audio's current time for viseme timing.
   const [currentAudioTime, setCurrentAudioTime] = useState(0);
@@ -135,51 +145,38 @@ export default function CourtroomScene({ lines, sceneId }) {
   // --- Helper: runPlayback ---
   // --- Updated runPlayback for Line-Based Cuts ---
   const runPlayback = async () => {
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
+    const linesToPlay = lines.slice(startFromIndex);
+    for (let i = 0; i < linesToPlay.length; i++) {
+      const line = linesToPlay[i];
       const { line_id, line_obj } = line;
-      setCurrentIndex(i);
+
+      const originalIndex = startFromIndex + i;
+      setCurrentIndex(originalIndex); // so UI reflects correct index in the full list
       setActiveSpeakerId(line_obj.character_id);
 
-      // Start a new recording segment for this line.
       console.log(`🎤 Starting recording for line ${line_id}`);
-
       startRecordingSegment();
-
-      // Play the audio clip for the current line.
       await playLineAudio(line_id, line_obj.audio_url);
 
-      // Wait for the specified pause (default 0.5 seconds) after the line.
       const pause = line_obj.pause_before ?? 0.5;
       await new Promise((r) => setTimeout(r, pause * 1000));
 
-      // Stop the recording segment.
       const blob = await stopRecordingSegment();
       console.log(`🎤 Stopping recording for line ${line_id}`);
-      // Process or send the recorded segment blob.
+
       if (blob) {
         const formData = new FormData();
-        formData.append("video", blob, `scene_segment_${i}.webm`);
+        formData.append("video", blob, `scene_segment_${line_id}.webm`);
         formData.append("sessionId", sessionId);
-        formData.append("segmentIndex", i.toString());
+        formData.append("line_id", line_id);
         formData.append("sceneId", sceneId);
 
         try {
-          fetch("http://localhost:3001/convert", {
+          await fetch("http://localhost:3001/convert", {
             method: "POST",
             body: formData,
           });
-          // const convertedBlob = await res.blob();
-          // // Optional: Trigger a download for the segment.
-          // const url = URL.createObjectURL(convertedBlob);
-          // const link = document.createElement("a");
-          // link.href = url;
-          // link.download = `scene_segment_${i}.mp4`;
-          // document.body.appendChild(link);
-          // link.click();
-          // document.body.removeChild(link);
-          // URL.revokeObjectURL(url);
-          console.log(`✅ MP4 downloaded for segment ${i}`);
+          console.log(`✅ MP4 uploaded for line_id ${line_id}`);
         } catch (err) {
           console.error("❌ Upload or conversion failed:", err);
         }
@@ -298,7 +295,7 @@ export default function CourtroomScene({ lines, sceneId }) {
       }
       if (currentIndex === -1) {
         setAutoPlay(true); // trigger auto-play
-        setCurrentIndex(0); // start from the first line
+        setCurrentIndex(startFromIndex); // start from the first line
 
         // Resume AudioContext if it is suspended.
         if (
