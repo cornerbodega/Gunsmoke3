@@ -126,7 +126,7 @@ const phonemeToViseme = {
   sil: "rest",
 };
 
-const MAX_CHUNKS = 30;
+const MAX_CHUNKS = 1;
 
 const textChunkSize = 7000;
 
@@ -171,11 +171,16 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
             name: char.name,
             speaker_label: char.speaker_label,
             role: char.role,
-            voice: assignVoiceForSpeaker(char.id), // assign voice now
           });
         }
       }
     }
+    speakerMap.set("clerk", {
+      name: "Clerk",
+      speaker_label: "Clerk",
+      role: "clerk",
+      voice: "en-US-Wavenet-C",
+    });
     // Step here to clean speakerMap
     console.log("👥 Final Speaker Map:", Object.fromEntries(speakerMap));
     // Log the start of the character cleaning process
@@ -229,9 +234,10 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
         name: char.name,
         speaker_label: char.speaker_label,
         role: char.role,
-        voice: assignVoiceForSpeaker(char.id), // assign voice now
       });
     }
+    await assignVoicesForAllSpeakers(speakerMap, openai);
+
     console.log(
       "[INFO] Updated speaker map with cleaned characters:",
       Object.fromEntries(speakerMap)
@@ -762,7 +768,7 @@ async function generateAudioAndVisemes(sceneId) {
     for (const row of rows) {
       const { line_id, line_obj } = row;
       const { text, character_id } = line_obj;
-      const voice = assignVoiceForSpeaker(character_id);
+      const voice = line_obj.voice; // ✅ already injected by metadata process
 
       // 🎙️ Generate TTS
       const { audioUrl, timepoints } = await generateTTS({
@@ -977,17 +983,6 @@ Merged segment:
   return mergedTranscript;
 }
 
-const availableVoices = [
-  "en-US-Wavenet-A",
-  "en-US-Wavenet-B",
-  "en-US-Wavenet-C",
-  "en-US-Wavenet-D",
-  "en-US-Wavenet-E",
-  "en-US-Wavenet-F",
-  "en-US-Wavenet-G",
-  "en-US-Wavenet-H",
-];
-
 function hashString(str) {
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
@@ -996,10 +991,101 @@ function hashString(str) {
   return hash;
 }
 
-function assignVoiceForSpeaker(speaker) {
-  // use ai for this! also keep a list of voices used
-  const index = Math.abs(hashString(speaker)) % availableVoices.length;
-  return availableVoices[index];
+// function assignVoiceForSpeaker(speaker) {
+//   const availableVoices = [
+//     "en-US-Wavenet-A",
+//     "en-US-Wavenet-B",
+//     "en-US-Wavenet-C",
+//     "en-US-Wavenet-D",
+//     "en-US-Wavenet-E",
+//     "en-US-Wavenet-F",
+//     "en-US-Wavenet-G",
+//     "en-US-Wavenet-H",
+//   ];
+//   // use ai for this! also keep a list of voices used
+//   const index = Math.abs(hashString(speaker)) % availableVoices.length;
+//   return availableVoices[index];
+// }
+async function assignVoicesForAllSpeakers(speakerMap, openai) {
+  const wavenetVoices = {
+    male: [
+      "en-US-Wavenet-A",
+      "en-US-Wavenet-B",
+      "en-US-Wavenet-C",
+      "en-US-Wavenet-D",
+      "en-US-Wavenet-I",
+    ],
+    female: [
+      "en-US-Wavenet-E",
+      "en-US-Wavenet-F",
+      "en-US-Wavenet-G",
+      "en-US-Wavenet-H",
+      "en-US-Wavenet-J",
+    ],
+  };
+
+  const usedVoices = new Set();
+
+  const characters = Array.from(speakerMap.entries()).map(([id, data]) => ({
+    id,
+    name: data.name,
+    role: data.role,
+  }));
+
+  const prompt = `
+You are assigning AI voices to courtroom characters.
+
+Return the most likely gender for each character as "male" or "female". Make your best guess from name and role.
+
+Return JSON:
+[
+  { "id": "elizabethholmes", "gender": "female" },
+  { "id": "judgelee", "gender": "male" }
+]
+
+Characters:
+${JSON.stringify(characters, null, 2)}
+  `;
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [{ role: "system", content: prompt }],
+    });
+
+    let content = response.choices[0].message.content.trim();
+    content = content
+      .replace(/^```(?:json)?/, "")
+      .replace(/```$/, "")
+      .trim();
+    const genders = JSON.parse(content);
+
+    for (const { id, gender } of genders) {
+      const voicePool =
+        gender === "female"
+          ? wavenetVoices.female
+          : gender === "male"
+          ? wavenetVoices.male
+          : [...wavenetVoices.male, ...wavenetVoices.female];
+
+      let assignedVoice = voicePool.find((v) => !usedVoices.has(v));
+      if (!assignedVoice) {
+        const hash = Math.abs(hashString(id));
+        assignedVoice = voicePool[hash % voicePool.length];
+      }
+      usedVoices.add(assignedVoice);
+
+      const character = speakerMap.get(id);
+      if (character) {
+        character.voice = assignedVoice;
+        character.gender = gender;
+      }
+    }
+
+    console.log("🔊 Assigned voices:", Object.fromEntries(speakerMap));
+  } catch (err) {
+    console.error("❌ Failed to assign voices:", err.message);
+  }
 }
 
 async function analyzeRawDocument(text) {

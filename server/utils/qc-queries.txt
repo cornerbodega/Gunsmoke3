@@ -1,52 +1,95 @@
--- Check for Voice Change
+/*==================================================
+=             DATA EXPLORATION QUERIES             =
+==================================================*/
+
+-- View recent lines
+-- SELECT * FROM gs3_lines ORDER BY created_at DESC;
+
+-- View all lines for a specific scene
+-- SELECT * FROM gs3_lines WHERE scene_id = 'dc378943-a3b5-48fa-94fc-ba16fe51c728';
+
+-- Count lines per scene
+-- SELECT scene_id, COUNT(*) AS line_count FROM gs3_lines GROUP BY scene_id;
+
+-- Create view for line counts
+-- CREATE OR REPLACE VIEW gs3_line_counts AS
+-- SELECT scene_id, COUNT(*) AS line_count
+-- FROM gs3_lines
+-- GROUP BY scene_id;
+
+
+/*==================================================
+=             DATA MAINTENANCE QUERIES             =
+==================================================*/
+
+-- Clear all scenes
+-- TRUNCATE TABLE gs3_scenes;
+
+-- Delete orphaned lines
+-- DELETE FROM gs3_lines
+-- WHERE scene_id NOT IN (SELECT scene_id FROM gs3_scenes);
+
+
+/*==================================================
+=             CONSTRAINT MANAGEMENT                =
+==================================================*/
+
+-- Add unique constraint on scene_id in scenes table
+-- ALTER TABLE gs3_scenes
+-- ADD CONSTRAINT gs3_scenes_scene_id_unique UNIQUE (scene_id);
+
+-- Add foreign key to lines table (scene_id)
+-- ALTER TABLE gs3_lines
+-- ADD CONSTRAINT gs3_lines_scene_id_fkey
+-- FOREIGN KEY (scene_id)
+-- REFERENCES gs3_scenes (scene_id)
+-- ON DELETE CASCADE;
+
+-- Drop constraints (if needed)
+-- ALTER TABLE gs3_lines DROP CONSTRAINT IF EXISTS gs3_lines_scene_id_fkey;
+-- ALTER TABLE gs3_scenes DROP CONSTRAINT IF EXISTS gs3_scenes_scene_id_unique;
+
+
+/*==================================================
+=             DATA QUALITY QUERIES                 =
+==================================================*/
+
+-- Characters with multiple voices
 -- SELECT
 --   scene_id,
 --   line_obj->>'character_id' AS character_id,
 --   COUNT(DISTINCT line_obj->>'voice') AS unique_voice_count
--- FROM
---   gs3_lines
--- WHERE
---   line_obj ? 'voice'
---   AND line_obj ? 'character_id'
--- GROUP BY
---   scene_id,
---   line_obj->>'character_id'
--- HAVING
---   COUNT(DISTINCT line_obj->>'voice') > 1;
+-- FROM gs3_lines
+-- WHERE line_obj ? 'voice' AND line_obj ? 'character_id'
+-- GROUP BY scene_id, line_obj->>'character_id'
+-- HAVING COUNT(DISTINCT line_obj->>'voice') > 1;
 
--- Duplicate Characters
+-- Duplicate characters for a given role
 -- SELECT
 --   scene_id,
 --   line_obj->>'role' AS role,
 --   COUNT(DISTINCT line_obj->>'character_id') AS num_characters
--- FROM
---   gs3_lines
--- WHERE
---   line_obj ? 'role'
---   AND line_obj ? 'character_id'
--- GROUP BY
---   scene_id,
---   line_obj->>'role'
--- HAVING
---   COUNT(DISTINCT line_obj->>'character_id') > 1;
+-- FROM gs3_lines
+-- WHERE line_obj ? 'role' AND line_obj ? 'character_id'
+-- GROUP BY scene_id, line_obj->>'role'
+-- HAVING COUNT(DISTINCT line_obj->>'character_id') > 1;
 
--- Duplicate Judge or Witness
+-- Duplicate judges or witnesses
 -- SELECT
 --   scene_id,
 --   line_obj->>'role' AS role,
 --   COUNT(DISTINCT line_obj->>'character_id') AS num_characters
--- FROM
---   gs3_lines
--- WHERE
---   line_obj->>'role' IN ('witness', 'judge')
+-- FROM gs3_lines
+-- WHERE line_obj->>'role' IN ('witness', 'judge')
 --   AND line_obj ? 'character_id'
--- GROUP BY
---   scene_id,
---   line_obj->>'role'
--- HAVING
---   COUNT(DISTINCT line_obj->>'character_id') > 1;
+-- GROUP BY scene_id, line_obj->>'role'
+-- HAVING COUNT(DISTINCT line_obj->>'character_id') > 1;
 
--- Find Character Role Changes
+
+/*==================================================
+=      FIND WITNESS ROLE CHANGES (ADJACENT)        =
+==================================================*/
+
 -- WITH ordered_witness_lines AS (
 --   SELECT
 --     scene_id,
@@ -56,62 +99,116 @@
 --       PARTITION BY scene_id
 --       ORDER BY line_id
 --     ) AS prev_character_id
---   FROM
---     gs3_lines
---   WHERE
---     line_obj->>'role' = 'witness'
---     AND line_obj ? 'character_id'
+--   FROM gs3_lines
+--   WHERE line_obj->>'role' = 'witness' AND line_obj ? 'character_id'
 -- )
-
 -- SELECT *
 -- FROM ordered_witness_lines
 -- WHERE character_id IS DISTINCT FROM prev_character_id
 --   AND prev_character_id IS NOT NULL;
 
--- Find Witness Role Interruptions
--- WITH witness_lines AS (
---   SELECT
---     scene_id,
---     line_id,
---     line_obj->>'character_id' AS character_id
---   FROM gs3_lines
---   WHERE
---     line_obj->>'role' = 'witness'
---     AND line_obj ? 'character_id'
--- ),
 
--- -- Group uninterrupted speaking runs
--- runs_tagged AS (
---   SELECT *,
---     ROW_NUMBER() OVER (PARTITION BY scene_id ORDER BY line_id) -
---     ROW_NUMBER() OVER (PARTITION BY scene_id, character_id ORDER BY line_id) AS run_group
---   FROM witness_lines
--- ),
+/*==================================================
+=   FIND WITNESS ROLE INTERRUPTIONS (AND SCORE)    =
+==================================================*/
 
--- -- Reduce to unique runs
--- runs AS (
---   SELECT
---     scene_id,
---     character_id,
---     MIN(line_id) AS start_line,
---     MAX(line_id) AS end_line,
---     COUNT(*) AS num_lines
---   FROM runs_tagged
---   GROUP BY scene_id, character_id, run_group
--- ),
+WITH witness_lines AS (
+  SELECT
+    scene_id,
+    line_id,
+    line_obj->>'character_id' AS character_id
+  FROM gs3_lines
+  WHERE line_obj->>'role' = 'witness' AND line_obj ? 'character_id'
+),
 
--- -- Add speaker before and after
--- runs_with_context AS (
---   SELECT *,
---     LAG(character_id) OVER (PARTITION BY scene_id ORDER BY start_line) AS prev_character,
---     LEAD(character_id) OVER (PARTITION BY scene_id ORDER BY start_line) AS next_character
---   FROM runs
--- )
+-- Group uninterrupted speaking runs
+runs_tagged AS (
+  SELECT *,
+    ROW_NUMBER() OVER (PARTITION BY scene_id ORDER BY line_id) -
+    ROW_NUMBER() OVER (PARTITION BY scene_id, character_id ORDER BY line_id) AS run_group
+  FROM witness_lines
+),
 
--- -- Simple scoring logic: short interruption between repeated speakers
--- SELECT *
--- FROM runs_with_context
--- WHERE num_lines <= 2
---   AND character_id IS DISTINCT FROM prev_character
---   AND prev_character = next_character
--- ORDER BY scene_id, start_line;
+-- Summarize each run
+runs AS (
+  SELECT
+    scene_id,
+    character_id,
+    MIN(line_id) AS start_line,
+    MAX(line_id) AS end_line,
+    COUNT(*) AS num_lines
+  FROM runs_tagged
+  GROUP BY scene_id, character_id, run_group
+),
+
+-- Add context: speaker before and after
+runs_with_context AS (
+  SELECT *,
+    LAG(character_id) OVER (PARTITION BY scene_id ORDER BY start_line) AS prev_character,
+    LEAD(character_id) OVER (PARTITION BY scene_id ORDER BY start_line) AS next_character
+  FROM runs
+),
+
+-- Role usage statistics
+role_counts AS (
+  SELECT
+    line_obj->>'character_id' AS character_id,
+    line_obj->>'role' AS role,
+    COUNT(*) AS role_count
+  FROM gs3_lines
+  WHERE line_obj ? 'character_id' AND line_obj ? 'role'
+  GROUP BY line_obj->>'character_id', line_obj->>'role'
+),
+
+role_totals AS (
+  SELECT character_id, SUM(role_count) AS total_count
+  FROM role_counts
+  GROUP BY character_id
+),
+
+role_dist AS (
+  SELECT
+    r.character_id,
+    r.role,
+    ROUND(r.role_count::numeric / t.total_count, 3) AS role_pct
+  FROM role_counts r
+  JOIN role_totals t ON r.character_id = t.character_id
+),
+
+-- Score based on role distribution
+scored_runs AS (
+  SELECT
+    r.*,
+    rd.role_pct AS current_witness_pct,
+    prev_rd.role_pct AS prev_witness_pct
+  FROM runs_with_context r
+  LEFT JOIN role_dist rd
+    ON r.character_id = rd.character_id AND rd.role = 'witness'
+  LEFT JOIN role_dist prev_rd
+    ON r.prev_character = prev_rd.character_id AND prev_rd.role = 'witness'
+)
+
+-- Final recommendation output
+SELECT
+  scene_id,
+  character_id AS interrupting_character,
+  prev_character AS likely_correct_character,
+  start_line,
+  end_line,
+  num_lines,
+  current_witness_pct,
+  prev_witness_pct,
+  ROUND(COALESCE(prev_witness_pct, 0) - COALESCE(current_witness_pct, 0), 3) AS witness_score_diff,
+  CASE
+    WHEN num_lines <= 2
+     AND character_id IS DISTINCT FROM prev_character
+     AND prev_character = next_character
+     AND (COALESCE(prev_witness_pct, 0) - COALESCE(current_witness_pct, 0)) > 0.4
+    THEN 'REASSIGN to prev_character'
+    ELSE 'review'
+  END AS recommendation
+FROM scored_runs
+WHERE num_lines <= 2
+  AND character_id IS DISTINCT FROM prev_character
+  AND prev_character = next_character
+ORDER BY scene_id, start_line;
