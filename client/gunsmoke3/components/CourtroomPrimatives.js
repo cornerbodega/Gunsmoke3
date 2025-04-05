@@ -461,7 +461,7 @@ export const Character = forwardRef(function Character(
   // Adjust these values as needed
   const eyelidParamsByEmotion = {
     neutral: { height: 0.02, rotation: 0 },
-    defensive: { height: -0.001, rotation: -0.25 },
+    defensive: { height: -0.001, rotation: 0.05 },
     confident: { height: 0.06, rotation: -0.05 },
     confused: { height: 0.025, rotation: 0.05 },
     angry: { height: -0.005, rotation: -0.2 },
