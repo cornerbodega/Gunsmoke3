@@ -40,6 +40,7 @@ export default function CourtroomScene({
 }) {
   const sessionId = useMemo(() => uuidv4(), []);
   // Proxy that supports resolving aliases seamlessly
+  const [introPlaying, setIntroPlaying] = useState(true);
 
   const startFromIndex = useMemo(() => {
     if (!startFromLineId) return 0;
@@ -104,6 +105,23 @@ export default function CourtroomScene({
       audioContextRef.current.createMediaStreamDestination();
   }, []);
   const [audioReady, setAudioReady] = useState(false); // ⬅️ Add this
+  useEffect(() => {
+    let introMusic;
+    if (introPlaying && audioReady) {
+      // Create a new audio instance without setting it to loop.
+      introMusic = new Audio("/intro_music.mp3");
+      introMusic
+        .play()
+        .catch((err) => console.error("Failed to play intro music:", err));
+    }
+    // Cleanup: pause and reset the music when the effect is cleaned up.
+    return () => {
+      if (introMusic) {
+        introMusic.pause();
+        introMusic.currentTime = 0;
+      }
+    };
+  }, [introPlaying, audioReady]);
 
   // --- New Effect: Set audioReady on first user interaction ---
   // This ensures that the browser allows audio playback.
@@ -287,7 +305,7 @@ export default function CourtroomScene({
       if (!headRefsReady || !audioReady || e.key !== "Enter") {
         return console.log(`❌ Not ready to start recording`);
       }
-      if (currentIndex === -1) {
+      if (currentIndex === -1 && !introPlaying) {
         setAutoPlay(true); // trigger auto-play
         setCurrentIndex(startFromIndex); // start from the first line
 
@@ -349,19 +367,50 @@ export default function CourtroomScene({
     console.log("Found target head:", resolvedCharacterRefs[targetId]?.headRef);
 
     // Update shared look target for non‑speakers.
-    if (speakerHead) {
+    // Update shared look target for non‑speakers.
+    // Force the eyeTarget to always use the judge’s head position.
+    if (resolvedCharacterRefs["judge"]?.headRef) {
+      const pos = new THREE.Vector3();
+      resolvedCharacterRefs["judge"].headRef.getWorldPosition(pos);
+      pos.y += 0.25; // adjust height offset if needed
+      lookTargetRef.current.position.copy(pos);
+    } else if (speakerHead) {
+      // Fallback if judge is not yet available.
       const pos = new THREE.Vector3();
       speakerHead.getWorldPosition(pos);
       lookTargetRef.current.position.copy(pos);
     }
+
     // Update speaker target for the active speaker.
-    if (speakerHead && targetHead) {
+    // Update speaker target for the active speaker.
+    if (speakerHead && targetHead && speakerId !== "judge") {
+      // For non-judge speakers, use the provided target.
       const pos2 = new THREE.Vector3();
       targetHead.getWorldPosition(pos2);
       pos2.y += 0.25;
       speakerTargetRef.current.position.copy(pos2);
       console.log(`Speaker ${speakerId} will look at ${targetId}.`);
+    } else if (speakerId === "judge" && targetHead && targetId !== "judge") {
+      // When the judge is speaking and his intended target isn’t himself…
+      const pos2 = new THREE.Vector3();
+      targetHead.getWorldPosition(pos2);
+      pos2.y += 0.25;
+      speakerTargetRef.current.position.copy(pos2);
+      console.log(`Judge will look at ${targetId}.`);
+    } else if (speakerId === "judge") {
+      // For judge: if no valid target (or if target is judge), pick the first non-judge character.
+      const nonJudgeEntry = Object.entries(resolvedCharacterRefs).find(
+        ([id, obj]) => id !== "judge" && obj.headRef
+      );
+      if (nonJudgeEntry) {
+        const pos2 = new THREE.Vector3();
+        nonJudgeEntry[1].headRef.getWorldPosition(pos2);
+        pos2.y += 0.25;
+        speakerTargetRef.current.position.copy(pos2);
+        console.log(`Judge falling back to ${nonJudgeEntry[0]}.`);
+      }
     } else {
+      // For non-judge speakers, fallback to the judge.
       console.log(
         `Speaker ${speakerId} has no valid target. Falling back to judge.`
       );
@@ -376,8 +425,22 @@ export default function CourtroomScene({
   }, [currentIndex, lines]);
 
   // --- Continuously Update Targets (inside Canvas) ---
-  function TargetUpdater() {
+  function TargetUpdater({ introPlaying }) {
     useFrame(() => {
+      if (introPlaying) {
+        // While the intro is playing, force everyone to look at the judge.
+        if (resolvedCharacterRefs["judge"]?.headRef) {
+          const pos = new THREE.Vector3();
+          resolvedCharacterRefs["judge"].headRef.getWorldPosition(pos);
+          pos.y += 0.25; // adjust as needed
+          lookTargetRef.current.position.copy(pos);
+        }
+        // Optionally, you could also set the judge’s own target
+        // to a fallback non‑judge if desired.
+        return; // early return; skip the rest of the logic
+      }
+
+      // Normal logic when intro is done.
       if (currentIndex === -1) return;
       const currentLine = lines[currentIndex]?.line_obj;
       if (!currentLine) return;
@@ -621,7 +684,9 @@ export default function CourtroomScene({
             characterRefs={characterRefs}
             lookTargetRef={lookTargetRef}
             speakerTargetRef={speakerTargetRef}
+            introPlaying={introPlaying}
           />
+
           <hemisphereLight intensity={0.1} />
           <hemisphereLight skyColor="white" groundColor="#444" intensity={0} />
           <directionalLight
@@ -740,23 +805,36 @@ export default function CourtroomScene({
                 })()}
 
                 {/* Judge (always at bench) */}
-                <Character
-                  key="judge"
-                  {...getLocationPose("judge_sitting_at_judge_bench")}
-                  onReady={(headRef) =>
-                    registerCharacter("judge", headRef, "judge")
-                  }
-                  params={{
-                    sitting: true,
-                    role: "judge",
-                    characterId: "judge",
-                    style: getStyleForCharacter("judge", "judge"),
-                    eyeTargetRef: lookTargetRef,
-                    speakerTargetRef,
-                    activeSpeakerId,
-                    emotion: "angry",
-                  }}
-                />
+                {introPlaying ? (
+                  <JudgeIntroAnimation
+                    registerCharacter={registerCharacter}
+                    lookTargetRef={lookTargetRef}
+                    judgeStyle={getStyleForCharacter("judge", "judge")} // Pass the judge appearance
+                    onComplete={() => {
+                      setIntroPlaying(false);
+                      setCurrentIndex(startFromIndex);
+                      runPlayback();
+                    }}
+                  />
+                ) : (
+                  <Character
+                    key="judge"
+                    {...getLocationPose("judge_sitting_at_judge_bench")}
+                    // onReady={(headRef) =>
+                    //   registerCharacter("judge", headRef, "judge")
+                    // }
+                    params={{
+                      sitting: true,
+                      role: "judge",
+                      characterId: "judge",
+                      style: getStyleForCharacter("judge", "judge"),
+                      eyeTargetRef: lookTargetRef,
+                      speakerTargetRef,
+                      activeSpeakerId,
+                      emotion: "angry",
+                    }}
+                  />
+                )}
 
                 {/* Clerk (always in clerk_box) */}
                 <Character
@@ -914,4 +992,100 @@ function useResolvedCharacterRefs(rawRef, aliasMap) {
       },
     });
   }, [aliasMap]);
+}
+
+function JudgeIntroAnimation({
+  onComplete,
+  lookTargetRef,
+  judgeStyle,
+  resolvedCharacterRefs,
+  registerCharacter,
+}) {
+  const judgeRef = useRef();
+  const [finalRotation, setFinalRotation] = useState([0, 0, 0]);
+  const clock = useRef(new THREE.Clock());
+  // console.log(`judgeStyle`, judgeStyle);
+  const waypoints = [
+    new THREE.Vector3(0, 0, 12), // Entrance
+    new THREE.Vector3(1, 0, -8), // Up the aisle
+    new THREE.Vector3(10, 0, -10), // In front of the witness stand
+    new THREE.Vector3(15, 0, -15), // Left of the witness stand
+    new THREE.Vector3(8, 0, -20), // Smoothing point
+    new THREE.Vector3(0, 0, -22), // Behind the witness stand
+    new THREE.Vector3(0, 2, -18), // Judge’s bench final position
+  ];
+
+  const curve = new THREE.CatmullRomCurve3(waypoints);
+
+  // Define camera start and end positions.
+  const camStart = new THREE.Vector3(0, 1.5, 15);
+  const camEnd = new THREE.Vector3(0, 4, -10);
+
+  const walkDelay = 3; // wait before walking
+  const duration = 14; // walk duration
+
+  useFrame(({ camera }) => {
+    const elapsed = clock.current.getElapsedTime();
+    const walkElapsed = Math.max(0, elapsed - walkDelay); // delay start
+    const t = Math.min(walkElapsed / duration, 1);
+    const easedT = t * t * (3 - 2 * t); // ease-in-out
+
+    const position = curve.getPoint(easedT);
+    const tangent = curve.getTangent(easedT);
+    const angle = Math.atan2(tangent.x, tangent.z);
+    setFinalRotation([0, angle, 0]);
+
+    if (judgeRef.current) {
+      judgeRef.current.position.copy(position);
+    }
+
+    // Only override lookTarget while the judge is walking
+    if (
+      t < 1 &&
+      lookTargetRef?.current &&
+      resolvedCharacterRefs?.judge?.headRef
+    ) {
+      const targetPos = new THREE.Vector3();
+      resolvedCharacterRefs.judge.headRef.getWorldPosition(targetPos);
+      targetPos.y += 0.25;
+      lookTargetRef.current.position.copy(targetPos);
+    }
+
+    // Add an upward offset to the position so the camera looks higher
+    const lookAtOffset = new THREE.Vector3(0, 1.5, 0);
+    camera.lookAt(position.clone().add(lookAtOffset));
+
+    // Camera follow
+    const camPos = camStart.clone().lerp(camEnd, easedT);
+    camera.position.copy(camPos);
+    camera.lookAt(position.clone().add(lookAtOffset));
+
+    if (t >= 1 && onComplete) {
+      onComplete();
+      onComplete = null;
+    }
+  });
+
+  useEffect(() => {
+    console.log("JudgeIntroAnimation judgeStyle:", judgeStyle);
+  }, [judgeStyle]);
+
+  return (
+    <group ref={judgeRef}>
+      <Character
+        role="judge"
+        characterId="judge"
+        onReady={(headRef) => registerCharacter("judge", headRef, "judge")}
+        params={{
+          style: judgeStyle,
+          sitting: false,
+          rotation: finalRotation,
+          eyeTargetRef: new THREE.Object3D(), // not used since we override global target
+          speakerTargetRef: new THREE.Object3D(),
+          activeSpeakerId: null,
+          emotion: "angry",
+        }}
+      />
+    </group>
+  );
 }

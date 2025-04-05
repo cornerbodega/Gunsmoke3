@@ -1274,8 +1274,8 @@ app.post("/convert", upload.single("video"), (req, res) => {
     .audioCodec("aac")
     .videoFilters("scale=ceil(iw/2)*2:ceil(ih/2)*2")
     .outputOptions(["-movflags +faststart", "-pix_fmt yuv420p", "-r 30"])
-    .on("start", (cmd) => console.log("🎬 FFmpeg started:", cmd))
-    .on("stderr", (line) => console.log("🧪 FFmpeg stderr:", line))
+    // .on("start", (cmd) => console.log("🎬 FFmpeg started:", cmd))
+    // .on("stderr", (line) => console.log("🧪 FFmpeg stderr:", line))
     .on("end", () => {
       console.log(`✅ Conversion finished: ${outputPath}`);
       fs.unlinkSync(inputPath);

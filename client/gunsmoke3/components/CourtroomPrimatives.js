@@ -484,6 +484,12 @@ export const Character = forwardRef(function Character(
       : params.eyeTargetRef;
 
     if (!targetRef?.current) return;
+
+    // Prevent self-targeting: if the target is the same as the character's own head, exit early.
+    if (targetRef.current === headRef.current) {
+      return;
+    }
+
     // Get the current real eye target position
     const newTarget = new THREE.Vector3();
     targetRef.current.getWorldPosition(newTarget);
@@ -537,8 +543,8 @@ export const Character = forwardRef(function Character(
       maxOffset
     );
 
-    leftPupilRef.current?.position.set(pupilX, pupilY, 0.0005);
-    rightPupilRef.current?.position.set(pupilX, pupilY, 0.0005);
+    leftPupilRef.current?.position.set(pupilX, pupilY, 0.005);
+    rightPupilRef.current?.position.set(pupilX, pupilY, 0.005);
 
     // Animate eyelid height and rotation based on emotion
     if (leftEyelidRef.current && rightEyelidRef.current) {
@@ -596,9 +602,10 @@ export const Character = forwardRef(function Character(
   const legRotation = sitting ? Math.PI / 2.2 : 0;
   const hipY = legHeight;
   const hipZ = sitting ? 0.4 : 0;
+  const passedRotation = params.rotation || rotation || [0, 0, 0];
   const finalRotation = sitting
-    ? [rotation[0], rotation[1] + Math.PI, rotation[2]]
-    : rotation;
+    ? [passedRotation[0], passedRotation[1] + Math.PI, passedRotation[2]]
+    : passedRotation;
 
   const torsoCenterY = torsoHeight / 2;
   const headCenterY = torsoHeight + headSize / 2;
@@ -684,14 +691,14 @@ export const Character = forwardRef(function Character(
               </mesh>
               <mesh
                 ref={side === "left" ? leftPupilRef : rightPupilRef}
-                position={[0, 0, 0.01]}
+                position={[0, 0, 0.005]}
               >
                 <circleGeometry args={[eyeSize / 3, 16]} />
                 <meshStandardMaterial color="black" />
               </mesh>
               <mesh
                 ref={side === "left" ? leftEyelidRef : rightEyelidRef}
-                position={[0, -0.015, 0.005]}
+                position={[0, -0.015, 0.05]}
               >
                 <circleGeometry args={[eyeSize * 1.2, 16, 0, Math.PI]} />
                 <meshStandardMaterial color={skin_color} />
