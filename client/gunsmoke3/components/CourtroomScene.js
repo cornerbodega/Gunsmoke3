@@ -1,4 +1,6 @@
 // components/CourtroomScene.jsx
+import { sendSlackMessage } from "@/utils/slack";
+
 import { v4 as uuidv4 } from "uuid";
 import { ClerkBox } from "@/components/CourtroomPrimatives";
 import { Canvas, useFrame } from "@react-three/fiber";
@@ -198,10 +200,13 @@ export default function CourtroomScene({
       const originalIndex = startFromIndex + i;
       setCurrentIndex(originalIndex); // so UI reflects correct index in the full list
       setActiveSpeakerId(line_obj.character_id);
-      console.log(`Line ${JSON.stringify(line_obj)}`);
+
+      // later inside your loop:
+      await sendSlackMessage(`🎙️ Line ${line_id}: ${line_obj.text}`);
 
       // Start a new recording segment for this line.
       console.log(`🎤 Starting recording for line ${line_id}`);
+
       startRecordingSegment();
       await playLineAudio(line_id, line_obj.audio_url);
 
