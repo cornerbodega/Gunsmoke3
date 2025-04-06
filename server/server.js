@@ -3,6 +3,8 @@ const { createClient } = require("@supabase/supabase-js");
 const saveToSupabase = require("./utils/saveToSupabase");
 const crypto = require("crypto");
 
+const sendSlackMessage = require("./utils/sendToSlack.js"); // adjust path if needed
+
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
@@ -180,6 +182,12 @@ async function getAllLinesForScene(sceneId) {
 app.post("/upload", upload.single("pdf"), async (req, res) => {
   try {
     console.log("📥 Received PDF upload...");
+    sendSlackMessage(
+      `📥 Received PDF upload...`,
+      "info",
+      "script-creation-logs"
+    ); // Slack message
+
     const sceneId = crypto.randomUUID(); // or whatever UUID you generate
     const filePath = req.file.path;
     const dataBuffer = fs.readFileSync(filePath);
@@ -189,13 +197,22 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
 
     fs.unlinkSync(filePath);
     console.log("📄 PDF parsed successfully");
-
+    sendSlackMessage(
+      `📥 PDF Parsed Successfully.`,
+      "success",
+      "script-creation-logs"
+    ); // Slack message
     const chunks = splitTextByChars(parsed.text, textChunkSize, 500);
     const limit = Math.min(MAX_CHUNKS, chunks.length);
     console.log(`🔢 Processing ${limit} of ${chunks.length} chunks`);
 
     // 🔍 Extract characters
     console.log("🔍 Extracting character list...");
+    sendSlackMessage(
+      `🔍 Extracting character list...`,
+      "info",
+      "script-creation-logs"
+    ); // Slack message
     // 🔍 Unified speaker map
     const speakerMap = new Map(); // id => { name, role, label, voice }
 
@@ -219,9 +236,18 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
     });
     // Step here to clean speakerMap
     console.log("👥 Final Speaker Map:", Object.fromEntries(speakerMap));
+    sendSlackMessage(
+      `👥 Final Speaker Map: ${JSON.stringify(Object.fromEntries(speakerMap))}`,
+      "info",
+      "script-creation-logs"
+    ); // Slack message
     // Log the start of the character cleaning process
     console.log("[INFO] Starting character cleaning process...");
-
+    sendSlackMessage(
+      `[INFO] Starting character cleaning process...`,
+      "info",
+      "script-creation-logs"
+    ); // Slack message
     // Call OpenAI to clean up the speakerMap and get unique characters
     console.log("[INFO] Sending speaker map to OpenAI for cleaning...");
     const charactersResponse = await openai.chat.completions.create({
@@ -255,10 +281,20 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
     try {
       parsedCharacters = JSON.parse(cleanedCharacters);
       console.log("[INFO] Successfully parsed cleaned characters.");
+      sendSlackMessage(
+        `[INFO] Successfully parsed cleaned characters.`,
+        "info",
+        "script-creation-logs"
+      );
     } catch (parseError) {
       console.error(
         "[ERROR] Failed to parse cleaned characters JSON:",
         parseError
+      );
+      sendSlackMessage(
+        `[ERROR] Failed to parse cleaned characters JSON:`,
+        "error",
+        "script-creation-logs"
       );
       throw parseError;
     }
@@ -286,6 +322,13 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
 
     for (let i = 0; i < limit; i++) {
       console.log(`🧼 Cleaning chunk ${i + 1} of ${chunks.length}`);
+      sendSlackMessage(
+        `🧼 Cleaning chunk ${i + 1} of ${
+          chunks.length
+        } (up to Max Chunks = ${MAX_CHUNKS})`,
+        "info",
+        "script-creation-logs"
+      );
       const cleanedText = await processChunk(
         chunks[i],
         speakerMap,
@@ -345,8 +388,20 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
       await saveToSupabase("gs3_lines", lineData).catch((error) =>
         console.error(`❌ Error saving line ${i + 1}:`, error.message)
       );
-      console.log(`✅ Line ${i + 1} saved to Supabase`);
-
+      console.log(
+        `✅ Line ${i + 1} of ${lines.length} = ${(
+          (i / lines.length) *
+          100
+        ).toFixed(2)}% saved to Supabase`
+      );
+      sendSlackMessage(
+        `✅ Line ${i + 1} of ${lines.length} = ${(
+          (i / lines.length) *
+          100
+        ).toFixed(2)}% saved to Supabase`,
+        "info",
+        "script-creation-logs"
+      );
       previousLines.push(lineObj);
       if (previousLines.length > CONTEXT_WINDOW) previousLines.shift();
     }
@@ -431,6 +486,7 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
           .replace(/```$/, "")
           .trim();
         console.log(`OpenAI Response at: ${new Date().toISOString()}`);
+
         return JSON.parse(jsonText);
       } catch (err) {
         console.error(
@@ -442,11 +498,34 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
     }
 
     console.log("🧵 Final transcript assembled");
-
+    sendSlackMessage(
+      `🧵 Final transcript assembled`,
+      "success",
+      "script-creation-logs"
+    );
     console.log("✅ All lines saved. Starting audio generation...");
+    sendSlackMessage(
+      `✅ All lines saved. Starting audio generation...`,
+      "success",
+      "script-creation-logs"
+    );
     await generateAudioAndVisemes(sceneId);
+    sendSlackMessage(
+      `🎙️ Audio and visemes generated`,
+      "success",
+      "script-creation-logs"
+    );
+
     await generateCharacterStyles(sceneId);
+    sendSlackMessage(
+      `🧑‍🎨 Character styles generated`,
+      "success",
+      "script-creation-logs"
+    );
+
     await assignZones(sceneId);
+    sendSlackMessage(`📦 Zones assigned`, "success", "script-creation-logs");
+
     // Build the knownCharacters array from speakerMap
     const knownCharacters = Array.from(speakerMap.values()).map((char) => ({
       name: char.name,
@@ -456,6 +535,11 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
 
     // Call the batch assignment function
     await assignCharactersBatch(sceneId, knownCharacters);
+    sendSlackMessage(
+      `🧠 Characters assigned`,
+      "success",
+      "script-creation-logs"
+    );
 
     const sceneMetadata = {
       scene_id: sceneId,
@@ -474,6 +558,11 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
     await saveToSupabase("gs3_scenes", sceneMetadata).catch((err) => {
       console.error("❌ Failed to save scene metadata:", err.message);
     });
+    sendSlackMessage(
+      `📄 Scene metadata saved for ${sceneId}`,
+      "success",
+      "script-creation-logs"
+    );
 
     res.json({
       message: "✅ Transcript processed",
@@ -704,28 +793,81 @@ async function uploadToGCS(
   return `https://storage.googleapis.com/${GCS_BUCKET_NAME}/${destinationPath}`;
 }
 
-async function generateTTS({ text, speaker, voiceName, sceneId, lineIndex }) {
+async function generateTTS({
+  text,
+  speaker,
+  voiceName,
+  sceneId,
+  lineIndex,
+  debug = false,
+  audioFormat = "LINEAR16",
+}) {
+  if (!text || !voiceName || !sceneId) {
+    throw new Error(
+      "Missing required TTS parameters: text, voiceName, sceneId."
+    );
+  }
+
+  const cleanedText = text.trim();
+  const filenameBase = `line_${String(lineIndex + 1).padStart(3, "0")}`;
+  const filename = `${filenameBase}.${audioFormat === "MP3" ? "mp3" : "wav"}`;
+  const destinationPath = `audio/scene_${sceneId}/${filename}`;
+
   const request = {
-    input: { text },
-    voice: { languageCode: "en-US", name: voiceName },
+    input: { text: cleanedText },
+    voice: {
+      languageCode: "en-US",
+      name: voiceName,
+    },
     audioConfig: {
-      audioEncoding: "LINEAR16",
+      audioEncoding: audioFormat,
       enableTimePointing: ["WORD"],
+      pitch: 0, // customizable
+      speakingRate: 1.0, // customizable
     },
   };
 
-  const [response] = await client.synthesizeSpeech(request);
+  let response;
+  try {
+    [response] = await client.synthesizeSpeech(request);
+  } catch (err) {
+    console.error("Google TTS failed:", err);
+    throw new Error(`TTS generation failed for line ${lineIndex + 1}`);
+  }
 
-  const { audioContent, timepoints } = response;
+  const { audioContent, timepoints = [] } = response;
 
-  const filename = `line_${String(lineIndex + 1).padStart(3, "0")}.mp3`;
-  const destinationPath = `audio/scene_${sceneId}/${filename}`;
+  if (!audioContent) {
+    throw new Error(`No audio content returned from TTS for: "${cleanedText}"`);
+  }
+
+  const audioUrl = await uploadToGCS(audioContent, destinationPath);
+
+  if (debug) {
+    console.log(`🗣️  Generated audio for line ${lineIndex + 1}`);
+    console.log(`📄 Text: "${cleanedText}"`);
+    console.log(
+      `⏱️ Timepoints (${timepoints.length}):`,
+      timepoints
+        .map((tp) => `${tp.markName}@${tp.timeSeconds.toFixed(2)}s`)
+        .join(" | ")
+    );
+  }
 
   return {
-    audioUrl: await uploadToGCS(response.audioContent, destinationPath),
-    timepoints: response.timepoints || [],
+    audioUrl,
+    timepoints,
+    metadata: {
+      text: cleanedText,
+      wordCount: cleanedText.split(/\s+/).length,
+      durationEstimate: (timepoints.at(-1)?.timeSeconds || 0) + 0.5,
+      sceneId,
+      lineIndex,
+      speaker,
+    },
   };
 }
+
 function alignVisemesWithTimings(text, timepoints, cmuDict) {
   const words = text.toUpperCase().split(/\s+/);
   const visemeFrames = [];
@@ -782,8 +924,6 @@ async function generateAudioAndVisemes(sceneId) {
         viseme_data: visemeData,
       };
 
-      console.log(`gs3_lines update for line ${line_id}:`, updatedLineObj);
-
       const { error: updateErr } = await supabase
         .from("gs3_lines")
         .update({ line_obj: updatedLineObj })
@@ -796,6 +936,11 @@ async function generateAudioAndVisemes(sceneId) {
           updateErr.message
         );
       } else {
+        sendSlackMessage(
+          `✅ Updated line ${line_id} with audio and visemes`,
+          "success",
+          "script-creation-logs"
+        );
         console.log(`✅ Updated line ${line_id} with audio and visemes`);
       }
     }
@@ -903,6 +1048,11 @@ async function cleanText(chunkText, speakerMap, lastSpeaker, lastLine) {
       "\n📤 Sending transcript cleaning prompt to OpenAI:\n",
       contextPrompt
     );
+    sendSlackMessage(
+      `📤 Sending transcript cleaning prompt to OpenAI:`,
+      "info",
+      "script-creation-logs"
+    );
     console.log(
       "📄 With input (first 1000 chars):\n",
       chunkText.slice(0, 1000)
@@ -922,6 +1072,11 @@ async function cleanText(chunkText, speakerMap, lastSpeaker, lastLine) {
     console.log(
       "📥 OpenAI response (transcript chunk):\n",
       result.slice(0, 1000)
+    );
+    sendSlackMessage(
+      `📥 OpenAI response (transcript chunk): ${result.slice(0, 100)}`,
+      "info",
+      "script-creation-logs"
     );
     console.log("────────────────────────────────────────────");
 
@@ -1284,11 +1439,21 @@ app.post("/convert", upload.single("video"), (req, res) => {
     // .on("stderr", (line) => console.log("🧪 FFmpeg stderr:", line))
     .on("end", () => {
       console.log(`✅ Conversion finished: ${outputPath}`);
+      sendSlackMessage(
+        `FFmpeg success: ${outputPath}`,
+        "success",
+        "script-creation-logs"
+      );
       fs.unlinkSync(inputPath);
       res.json({ message: "Video segment converted and saved" });
     })
     .on("error", (err) => {
       console.error("❌ FFmpeg error:", err.message || err);
+      sendSlackMessage(
+        `FFmpeg error: ${err.message || err}`,
+        "error",
+        "script-creation-logs"
+      );
       if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
       res.status(500).send("Conversion failed");
     })
