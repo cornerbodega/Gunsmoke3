@@ -204,7 +204,9 @@ export default function CourtroomScene({
       setActiveSpeakerId(line_obj.character_id);
 
       // later inside your loop:
-      await sendSlackMessage(`🎙️ Line ${line_id}: ${line_obj.text}`);
+      await sendSlackMessage(
+        `🎙️ Line ${line_id}: ${line_obj.text}. Speaker: ${line_obj.character_id}. Target: ${line_obj.eye_target}`
+      );
 
       // Start a new recording segment for this line.
       console.log(`🎤 Starting recording for line ${line_id}`);
