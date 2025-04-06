@@ -328,11 +328,28 @@ export default function CourtroomScene({
 
   // --- New Recording Segment Functions ---
   const startRecordingSegment = () => {
-    // Reinitialize the audio destination for a fresh stream segment.
+    // Reinitialize the audio destination
     audioDestRef.current =
       audioContextRef.current.createMediaStreamDestination();
-    // Reset previously recorded chunks.
     recordedChunks.current = [];
+
+    // ✅ Reconnect audio source to new recording destination
+    if (audioRef.current && audioContextRef.current && sourceNodeRef.current) {
+      try {
+        sourceNodeRef.current.disconnect();
+      } catch (e) {
+        console.warn("🔌 Could not disconnect previous audio routing:", e);
+      }
+
+      try {
+        sourceNodeRef.current.connect(audioContextRef.current.destination);
+        sourceNodeRef.current.connect(audioDestRef.current);
+        console.log("✅ Reconnected audio source to new destination");
+      } catch (e) {
+        console.error("❌ Failed to reconnect audio for recording:", e);
+      }
+    }
+
     if (!canvasRef.current || !audioDestRef.current) return;
     const canvasStream = canvasRef.current.captureStream(60);
     const audioStream = audioDestRef.current.stream;
@@ -340,17 +357,19 @@ export default function CourtroomScene({
       ...canvasStream.getTracks(),
       ...audioStream.getTracks(),
     ]);
+
     mediaRecorder.current = new MediaRecorder(combinedStream, {
       mimeType: "video/webm; codecs=vp9",
     });
+
     mediaRecorder.current.ondataavailable = (event) => {
       if (event.data.size > 0) {
         recordedChunks.current.push(event.data);
       }
     };
-    // Start recording with a timeslice (e.g., 1000ms).
+
     mediaRecorder.current.start(1000);
-    console.log("Segment recording started with timeslice 1000ms.");
+    console.log("🎬 Segment recording started");
   };
 
   const stopRecordingSegment = () => {

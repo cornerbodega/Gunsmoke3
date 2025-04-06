@@ -1400,7 +1400,7 @@ app.get("/audio-proxy", async (req, res) => {
 app.post("/convert", upload.single("video"), (req, res) => {
   const sceneId = req.body.sceneId;
   const sessionId = req.body.sessionId;
-  const line_id = req.body.line_id;
+  const line_id = req.body.line_id || `0`;
   const folderName = `${sessionId}-${sceneId}`;
   const folderPath = path.join(__dirname, "videos", folderName);
 
