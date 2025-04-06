@@ -50,6 +50,7 @@ export default function CourtroomScene({
     const index = lines.findIndex((line) => line.line_id === startFromLineId);
     return index === -1 ? 0 : index;
   }, [startFromLineId, lines]);
+  const cameraTargetRef = useRef(new THREE.Object3D());
 
   const [currentIndex, setCurrentIndex] = useState(-1);
   const [activeSpeakerId, setActiveSpeakerId] = useState(null);
@@ -707,7 +708,12 @@ export default function CourtroomScene({
     // console.log(`🧭 Zone snapshot at line ${currentIndex}:`, zoneOccupancy);
     return { zoneOccupancy, characterZones };
   };
-
+  function CameraTargetUpdater() {
+    useFrame(({ camera }) => {
+      cameraTargetRef.current.position.lerp(camera.position, 0.15);
+    });
+    return null;
+  }
   return (
     <div style={{ width: "100vw", height: "100vh" }}>
       <Canvas
@@ -729,6 +735,10 @@ export default function CourtroomScene({
               "wide_establishing"
             }
           />
+
+          <primitive object={cameraTargetRef.current} />
+          <CameraTargetUpdater />
+
           <primitive object={lookTargetRef.current} />
           <TargetUpdater
             currentIndex={currentIndex}
@@ -824,6 +834,7 @@ export default function CourtroomScene({
                                 "judge",
                                 "judge"
                               )}
+                              eyeTargetRef={cameraTargetRef}
                               introPlaying={introPlaying}
                               startIntroRecording={startIntroRecording}
                               stopIntroRecording={stopIntroRecording}
@@ -1095,6 +1106,7 @@ function JudgeIntroAnimation({
   playIntroAudio,
   playTriggered,
   introPlaying,
+  eyeTargetRef,
   sessionId,
   sceneId,
   ready,
@@ -1121,7 +1133,7 @@ function JudgeIntroAnimation({
   const camStart = new THREE.Vector3(0, 1.5, 15);
   const camEnd = new THREE.Vector3(0, 4, -10);
 
-  const walkDelay = 3; // wait before walking
+  const walkDelay = 0; // wait before walking
   const duration = 14; // walk duration
 
   useEffect(() => {
@@ -1225,7 +1237,7 @@ function JudgeIntroAnimation({
           style: judgeStyle,
           sitting: false,
           rotation: finalRotation,
-          eyeTargetRef: new THREE.Object3D(), // not used since we override global target
+          eyeTargetRef: eyeTargetRef,
           speakerTargetRef: new THREE.Object3D(),
           activeSpeakerId: null,
           emotion: "angry",
