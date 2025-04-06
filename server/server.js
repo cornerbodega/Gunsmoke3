@@ -891,7 +891,10 @@ async function cleanText(chunkText, speakerMap, lastSpeaker, lastLine) {
       })
     )}. Return dialog only, in the format "Speaker Name: line". Do not explain or summarize. Omit narration or non-dialog text. 
       
-      ⚠️ If the transcript includes any redaction codes (such as (b)(6), (b)(7)(C), or similar), replace them with "Redacted". Ensure redacted portions are cleanly replaced and do not break sentence structure.`;
+      ⚠️ If the transcript includes any redaction codes (such as (b)(6), (b)(7)(C), or similar), replace them with "Redacted". Ensure redacted portions are cleanly replaced and do not break sentence structure.
+      
+      Note: If the speaker's eye target would change over the course of a statement, split each statement into its own line.
+      `;
 
     const sampleInput = `version, how many tests could it run 18 at that time in 2010? 19 A I don't know exactly what the number was...`;
     const sampleOutput = `Jessica Chan: Version, how many tests could it run at that time in 2010?\nElizabeth Holmes: I don't know exactly what the number was...`;
