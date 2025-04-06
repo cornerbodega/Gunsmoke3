@@ -53,6 +53,7 @@ export async function getServerSideProps(context) {
       camera: "wide_establishing",
     },
   };
+  console.log(`📜 Fetched ${lines.length} lines for scene ${sceneId}`);
 
   if (error) {
     return { props: { lines: [], sceneId } };

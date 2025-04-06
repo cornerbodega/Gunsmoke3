@@ -169,65 +169,56 @@ export default function CourtroomScene({
     });
   };
 
-  // --- Helper: playLineAudio ---
-  // Loads a single audio clip, routes it to the recording destination,
-  // plays it, and then cleans up the source node and audio element.
-  const playLineAudio = async (lineId, audioUrl) => {
+  // --- Helper: playLineAudio (reusable single Audio instance) ---
+  const audioRef = useRef(null);
+  const sourceNodeRef = useRef(null);
+
+  // Create one Audio + source node on mount
+  useEffect(() => {
+    const audio = new Audio();
+    audio.crossOrigin = "anonymous";
+    audio.preload = "auto";
+
+    const ctx = audioContextRef.current;
+    const dest = audioDestRef.current;
+    const srcNode = ctx.createMediaElementSource(audio);
+    srcNode.connect(ctx.destination);
+    srcNode.connect(dest);
+
+    audioRef.current = audio;
+    sourceNodeRef.current = srcNode;
+
+    return () => {
+      srcNode.disconnect();
+      audio.pause();
+      audio.src = "";
+    };
+  }, []);
+
+  // Reusable playLineAudio
+  const playLineAudio = (lineId, audioUrl) => {
     return new Promise((resolve, reject) => {
-      const audio = new Audio(
-        `/api/audio-proxy?url=${encodeURIComponent(audioUrl)}`
-      );
-      audio.crossOrigin = "anonymous";
-      audio.preload = "auto";
+      const audio = audioRef.current;
+      audio.src = `/api/audio-proxy?url=${encodeURIComponent(audioUrl)}`;
+      audio.currentTime = 0;
 
-      let sourceNode = null;
-
+      const cleanup = () => {
+        audio.removeEventListener("ended", onEnded);
+        audio.removeEventListener("error", onError);
+      };
       const onEnded = () => {
-        // Disconnect and allow cleanup of the audio element.
-        if (sourceNode) {
-          try {
-            sourceNode.disconnect();
-          } catch (e) {
-            console.warn(`Failed to disconnect for ${lineId}`, e);
-          }
-          sourceNode = null;
-        }
-        // Remove the audio element so it can be garbage collected.
-        audio.remove();
+        cleanup();
         resolve();
       };
-
-      const onError = (err) => {
-        console.error(`Error playing audio for ${lineId}`, err);
-        reject(err);
+      const onError = (e) => {
+        cleanup();
+        console.error(`Error playing audio for ${lineId}`, e);
+        resolve(); // resolve so the loop keeps going
       };
-
-      audio.addEventListener(
-        "canplaythrough",
-        () => {
-          try {
-            sourceNode =
-              audioContextRef.current.createMediaElementSource(audio);
-            // Connect to both the default destination and the MediaStreamDestination for recording.
-            sourceNode.connect(audioContextRef.current.destination);
-            sourceNode.connect(audioDestRef.current);
-            audio.play().catch(onError);
-            const updateTime = () => {
-              setCurrentAudioTime(audio.currentTime);
-              if (!audio.ended) {
-                requestAnimationFrame(updateTime);
-              }
-            };
-            requestAnimationFrame(updateTime);
-          } catch (e) {
-            onError(e);
-          }
-        },
-        { once: true }
-      );
 
       audio.addEventListener("ended", onEnded, { once: true });
       audio.addEventListener("error", onError, { once: true });
+      audio.play().catch(onError);
     });
   };
 
@@ -244,7 +235,7 @@ export default function CourtroomScene({
       setActiveSpeakerId(line_obj.character_id);
 
       // later inside your loop:
-      await sendSlackMessage(
+      sendSlackMessage(
         `🎙️ Line ${line_id}: ${line_obj.text} Speaker: ${line_obj.character_id}. Target: ${line_obj.eye_target}`
       );
 
