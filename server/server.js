@@ -504,6 +504,7 @@ async function assignCharactersBatch(sceneId, knownCharacters, batchSize = 10) {
 You are analyzing a courtroom transcript and need to determine the correct character for each line of dialogue. You will receive a list of lines, each with a unique line ID and the text spoken by the character. Your task is to assign the correct character to each line based on the context of the dialogue. The existing character IDs are not necessarily correct, so you need to analyze the text and assign the correct character.
 Use the following list of known characters to select the appropriate character for each line.
 Each character is represented by a name and a normalized ID (lowercase with no spaces or punctuation).
+If the character says something meta like "this concludes... or "this resumes..." assign them to the judge.
 
 Known characters:
 ${JSON.stringify(knownCharacters, null, 2)}
@@ -607,6 +608,8 @@ Rules:
 - **Defendants** must be in "defense_table_right" or "witness_at_witness_stand".
 - **Defense** roles should only be in "defense_table_left".
 - **Prosecutors** must be in "prosecutor_table_left", "prosecutor_at_witness_stand", "prosecutor_table_right",
+- **Judge** is in "judge_sitting_at_judge_bench"
+- **Clerk** in "clerk_box".
 - Do not invent new zones. Choose the most contextually accurate location based on previous line zones and speaker roles and courtroom logic.
 Camera angles:
 - Choose a shot: "wide_establishing" or "crossExaminationFromWell" or "judge_closeup" or "witness_closeup" or "prosecutor_table" or "defense_table" or "bailiff_reaction" or "wide_view_from_jury",
@@ -1274,8 +1277,8 @@ app.post("/convert", upload.single("video"), (req, res) => {
     .audioCodec("aac")
     .videoFilters("scale=ceil(iw/2)*2:ceil(ih/2)*2")
     .outputOptions(["-movflags +faststart", "-pix_fmt yuv420p", "-r 30"])
-    .on("start", (cmd) => console.log("🎬 FFmpeg started:", cmd))
-    .on("stderr", (line) => console.log("🧪 FFmpeg stderr:", line))
+    // .on("start", (cmd) => console.log("🎬 FFmpeg started:", cmd))
+    // .on("stderr", (line) => console.log("🧪 FFmpeg stderr:", line))
     .on("end", () => {
       console.log(`✅ Conversion finished: ${outputPath}`);
       fs.unlinkSync(inputPath);

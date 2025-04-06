@@ -44,45 +44,12 @@ export default function CourtroomScene({
   // Proxy that supports resolving aliases seamlessly
 
   // NEW: Fetch all lines if the initial prop is limited to 1000 lines.
-  const [allLines, setAllLines] = useState(lines);
-  useEffect(() => {
-    async function fetchAllLines() {
-      if (lines.length === 1000) {
-        let result = [...lines];
-        let from = 1000;
-        const pageSize = 1000;
-        let hasMore = true;
-        while (hasMore) {
-          const res = await fetch(
-            `/api/lines?sceneId=${sceneId}&from=${from}&to=${
-              from + pageSize - 1
-            }`
-          );
-          const data = await res.json();
-          if (data && data.lines && data.lines.length > 0) {
-            result = result.concat(data.lines);
-            if (data.lines.length < pageSize) {
-              hasMore = false;
-            } else {
-              from += pageSize;
-            }
-          } else {
-            hasMore = false;
-          }
-        }
-        setAllLines(result);
-      }
-    }
-    fetchAllLines();
-  }, [lines, sceneId]);
 
   const startFromIndex = useMemo(() => {
     if (!startFromLineId) return 0;
-    const index = allLines.findIndex(
-      (line) => line.line_id === startFromLineId
-    );
+    const index = lines.findIndex((line) => line.line_id === startFromLineId);
     return index === -1 ? 0 : index;
-  }, [startFromLineId, allLines]);
+  }, [startFromLineId, lines]);
 
   const [currentIndex, setCurrentIndex] = useState(-1);
   const [activeSpeakerId, setActiveSpeakerId] = useState(null);
@@ -98,7 +65,7 @@ export default function CourtroomScene({
       jury: "jury-2",
     };
 
-    allLines.forEach(({ line_obj }) => {
+    lines.forEach(({ line_obj }) => {
       const { role, character_id } = line_obj;
       if (role && character_id && !map[role]) {
         map[role] = character_id;
@@ -106,7 +73,7 @@ export default function CourtroomScene({
     });
 
     return map;
-  }, [allLines]);
+  }, [lines]);
 
   const characterRefs = useRef({});
   const resolvedCharacterRefs = useResolvedCharacterRefs(
@@ -227,7 +194,7 @@ export default function CourtroomScene({
   // --- Helper: runPlayback ---
   // --- Updated runPlayback for Line-Based Cuts ---
   const runPlayback = async () => {
-    const linesToPlay = allLines.slice(startFromIndex);
+    const linesToPlay = lines.slice(startFromIndex);
     for (let i = 0; i < linesToPlay.length; i++) {
       const line = linesToPlay[i];
       const { line_id, line_obj } = line;
@@ -345,7 +312,7 @@ export default function CourtroomScene({
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [currentIndex, allLines, headRefsReady, audioReady]);
+  }, [currentIndex, lines, headRefsReady, audioReady]);
 
   // useEffect(() => {
   //   console.log(`[Scene] currentAudioTime: ${currentAudioTime?.toFixed(2)}`);
@@ -354,7 +321,7 @@ export default function CourtroomScene({
   // --- One-Time Update on New Line (unchanged) ---
   useEffect(() => {
     if (currentIndex === -1) return;
-    const currentLine = allLines[currentIndex]?.line_obj;
+    const currentLine = lines[currentIndex]?.line_obj;
     const speakerId = currentLine?.role;
     const targetId = currentLine?.eye_target;
     console.log(
@@ -413,13 +380,13 @@ export default function CourtroomScene({
         console.log(`Speaker ${speakerId} falling back to judge as target.`);
       }
     }
-  }, [currentIndex, allLines]);
+  }, [currentIndex, lines]);
 
   // --- Continuously Update Targets (inside Canvas) ---
   function TargetUpdater() {
     useFrame(() => {
       if (currentIndex === -1) return;
-      const currentLine = allLines[currentIndex]?.line_obj;
+      const currentLine = lines[currentIndex]?.line_obj;
       if (!currentLine) return;
       const speakerId = currentLine.character_id;
       const targetId = currentLine.eye_target;
@@ -479,7 +446,7 @@ export default function CourtroomScene({
   const zoneMap = {
     judge_sitting_at_judge_bench: {
       position: [0, 2, -18],
-      rotation: [0, Math.PI, 0],
+      rotation: [0, 0, 0],
     },
     witness_at_witness_stand: {
       position: [-10, 1.1, -15],
@@ -519,7 +486,7 @@ export default function CourtroomScene({
   // Build mapping of character id to their specified style.
   const characterStyleMapping = useMemo(() => {
     const mapping = {};
-    allLines.forEach(({ line_obj }) => {
+    lines.forEach(({ line_obj }) => {
       const { role, style } = line_obj;
       if (role && style && !mapping[role]) {
         mapping[role] = style;
@@ -527,7 +494,7 @@ export default function CourtroomScene({
     });
     // console.log("✅ Final style mapping from DB:", mapping);
     return mapping;
-  }, [allLines]);
+  }, [lines]);
 
   const getStyleForCharacter = (id, role) => {
     const key = role || id;
@@ -565,10 +532,10 @@ export default function CourtroomScene({
   };
   useEffect(() => {
     if (currentIndex !== -1) {
-      const currentLine = allLines[currentIndex].line_obj;
+      const currentLine = lines[currentIndex].line_obj;
       console.log("Active emotion:", currentLine.emotion);
     }
-  }, [currentIndex, allLines]);
+  }, [currentIndex, lines]);
 
   const generateDeterministicStyle = (id) => {
     const palette = {
@@ -650,15 +617,14 @@ export default function CourtroomScene({
         <Suspense fallback={null}>
           <CameraController
             activePreset={
-              (currentIndex !== -1 &&
-                allLines[currentIndex]?.line_obj.camera) ||
+              (currentIndex !== -1 && lines[currentIndex]?.line_obj.camera) ||
               "wide_establishing"
             }
           />
           <primitive object={lookTargetRef.current} />
           <TargetUpdater
             currentIndex={currentIndex}
-            lines={allLines}
+            lines={lines}
             characterRefs={characterRefs}
             lookTargetRef={lookTargetRef}
             speakerTargetRef={speakerTargetRef}
@@ -728,8 +694,8 @@ export default function CourtroomScene({
                 {/* Dynamic Characters (Based on zoneOccupancy) */}
                 {(() => {
                   const { zoneOccupancy, characterZones } = getZoneOccupancy(
-                    allLines,
-                    currentIndex === -1 ? allLines.length - 1 : currentIndex
+                    lines,
+                    currentIndex === -1 ? lines.length - 1 : currentIndex
                   );
                   // Force 'prosecutor_table_right' if not already set.
                   if (!zoneOccupancy["prosecutor_table_right"]) {
@@ -739,13 +705,13 @@ export default function CourtroomScene({
                     ([zone, characterId]) => {
                       if (!characterId) return null;
 
-                      const lineData = allLines.find(
+                      const lineData = lines.find(
                         (l) => l.line_obj.character_id === characterId
                       );
                       const role = lineData?.line_obj?.role || characterId;
                       const isActive =
                         currentIndex !== -1 &&
-                        allLines[currentIndex].line_obj.character_id ===
+                        lines[currentIndex].line_obj.character_id ===
                           characterId;
 
                       return (
@@ -763,14 +729,14 @@ export default function CourtroomScene({
                             characterId,
                             style: getStyleForCharacter(characterId, role),
                             viseme_data: isActive
-                              ? allLines[currentIndex].line_obj.viseme_data
+                              ? lines[currentIndex].line_obj.viseme_data
                               : null,
                             audioTime: isActive ? currentAudioTime : 0,
                             eyeTargetRef: lookTargetRef,
                             speakerTargetRef,
                             activeSpeakerId,
                             emotion: isActive
-                              ? allLines[currentIndex].line_obj.emotion ||
+                              ? lines[currentIndex].line_obj.emotion ||
                                 "neutral"
                               : "neutral",
                           }}
@@ -781,7 +747,7 @@ export default function CourtroomScene({
                 })()}
 
                 {/* Judge (always at bench) */}
-                <Character
+                {/* <Character
                   key="judge"
                   {...getLocationPose("judge_sitting_at_judge_bench")}
                   onReady={(headRef) =>
@@ -797,7 +763,7 @@ export default function CourtroomScene({
                     activeSpeakerId,
                     emotion: "angry",
                   }}
-                />
+                /> */}
 
                 {/* Clerk (always in clerk_box) */}
                 <Character
