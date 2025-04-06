@@ -39,6 +39,20 @@ export async function getServerSideProps(context) {
   }
 
   const { lines, error } = await fetchLinesRecursively();
+  const introLine = {
+    line_id: 0,
+    line_obj: {
+      character_id: "judge",
+      role: "judge",
+      eye_target: "witness",
+      zone: "judge_sitting_at_judge_bench",
+      text: "Please rise for the honorable judge entering the courtroom.",
+      audio_url: "/audio/intro.mp3", // swap with your actual audio
+      pause_before: 0.5,
+      emotion: "neutral",
+      camera: "wide_establishing",
+    },
+  };
 
   if (error) {
     return { props: { lines: [], sceneId } };
@@ -46,7 +60,7 @@ export async function getServerSideProps(context) {
 
   return {
     props: {
-      lines,
+      lines: [introLine, ...lines],
       sceneId,
     },
   };
