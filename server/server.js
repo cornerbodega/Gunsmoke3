@@ -435,17 +435,16 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
       You're helping animate courtroom scenes. Given a character's current line of dialog and the full metadata of the previous line, return updated metadata for the current line in the following JSON format using the exact value options if specified. Do not create new values or change the numbers. Lawyer roles can be shared across characters.
       
       {
+        "text": "Return the speech of the character ",
+        "character_id": "The character_id of the character speaking the line. Make your best guess from the list.",
+        "role": "witness" or "prosecutor1" or "prosecutor2" or "defense1", // do a sanity check that this role would say this line
         "posture": "sitting" or "standing",
         "emotion": "neutral" or "tense" or "confident" or "nervous" or "defensive",
-        "role": "witness" or "prosecutor1" or "prosecutor2" or "defense1",
         "eye_target": "judge" or "witness" or "prosecutor1" or "prosecutor2"" or "defense1" or "jury",
         "pause_before": "choose a number with respect to previous line for cinematic timing. 0.5 is a good default.",
-        "text": "Return only the speech of the character.",
-        "character_id": "The character_id of the character speaking the line. Make your best guess from the list.",
       }
       
-      Use the prior metadata to keep scene continuity but adapt based on the new dialog. DO NOT wrap your response in markdown or explanation — just return the raw JSON only.
-      Defense team all have zone of defense_table_left.
+      Use the prior metadata to keep scene continuity but adapt based on the new dialog.
       
       ${speakerLine}
       ${currentLineText}
@@ -1037,13 +1036,25 @@ async function cleanText(chunkText, speakerMap, lastSpeaker, lastLine) {
     )}. Return dialog only, in the format "Speaker Name: line". Do not explain or summarize. Omit narration or non-dialog text. 
       
       ⚠️ If the transcript includes any redaction codes (such as (b)(6), (b)(7)(C), or similar), replace them with "Redacted". Ensure redacted portions are cleanly replaced and do not break sentence structure.
-      
-      Note: If the speaker's eye target would change over the course of a statement, split each statement into its own line.
       `;
 
-    const sampleInput = `version, how many tests could it run 18 at that time in 2010? 19 A I don't know exactly what the number was...`;
-    const sampleOutput = `Jessica Chan: Version, how many tests could it run at that time in 2010?\nElizabeth Holmes: I don't know exactly what the number was...`;
-
+    // const sampleInput = `version, how many tests could it run 18 at that time in 2010? 19 A I don't know exactly what the number was...`;
+    const sampleInput = `THE VIDEOGRAPHER: We are on the record at the
+3 beginning of Media No. 1, Volume I. My name is
+4 ~b K6);(b )(7)(C) contracted by Hahn & Bowersock.
+5 Please begin.
+6 MS. CHAN: This is the testimony of Elizabeth 
+7 Holmes. Going on the record in San Francisco,
+8 California, at 9 o'clock a .m. on July 11th, 2017.
+9 Ms. Holmes, please raise your right hand. Do
+10 you swear to tell the truth, the whole truth, and nothing
+11 but the truth?
+12
+13
+14 Whereupon,
+MS. HOLMES: I do. `;
+    // const sampleOutput = `Jessica Chan: Version, how many tests could it run at that time in 2010?\nElizabeth Holmes: I don't know exactly what the number was...`;
+    const sampleOutput = `Jessica Chan: This is the testimony of Elizabeth Holmes. Going on the record in San Francisco, California, at 9 o'clock a.m. on July 11, 2017.\nJessica Chan: Ms. Holmes, please raise your right hand. Do you swear to tell the truth, the whole truth, and nothing but the truth?\nElizabeth Holmes: I do.`;
     console.log(
       "\n📤 Sending transcript cleaning prompt to OpenAI:\n",
       contextPrompt
