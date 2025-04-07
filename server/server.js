@@ -438,7 +438,7 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
         "posture": "sitting" or "standing",
         "emotion": "neutral" or "tense" or "confident" or "nervous" or "defensive",
         "role": "witness" or "prosecutor1" or "prosecutor2" or "defense1",
-        "eye_target": "judge" or "witness" or "prosecutor1" or "prosecutor2"" or "defense1" or "defendant" or "jury",
+        "eye_target": "judge" or "witness" or "prosecutor1" or "prosecutor2"" or "defense1" or "jury",
         "pause_before": "choose a number with respect to previous line for cinematic timing. 0.5 is a good default.",
         "text": "Return only the speech of the character.",
         "character_id": "The character_id of the character speaking the line. Make your best guess from the list.",
@@ -695,7 +695,6 @@ You are assigning spatial zones and camera angles in a courtroom animation based
 
 Rules:
 - The **witness** must always be in "witness_at_witness_stand".
-- **Defendants** must be in "defense_table_right" or "witness_at_witness_stand".
 - **Defense** roles should only be in "defense_table_left".
 - **Prosecutors** must be in "prosecutor_table_left", "prosecutor_at_witness_stand", "prosecutor_table_right",
 - **Judge** is in "judge_sitting_at_judge_bench"
