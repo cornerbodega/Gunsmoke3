@@ -87,8 +87,7 @@ export default function CourtroomScene({
   const speakerTargetRef = useRef(new THREE.Object3D());
   const [ready, setReady] = useState(false);
   const [headRefsReady, setHeadRefsReady] = useState(false);
-  const [playTriggered, setplayTriggered] = useState(false);
-  // const [playTriggered, setPlayTriggered] = useState(false);
+  const [playTriggered, setPlayTriggered] = useState(false);
   const [introPlaying, setIntroPlaying] = useState(true);
 
   function resolveCharacterId(id) {
@@ -325,19 +324,19 @@ export default function CourtroomScene({
       }
     });
   };
+  const lastUpdate = useRef(0);
   useEffect(() => {
-    let frameId;
-
     const updateAudioTime = () => {
-      if (audioRef.current && !audioRef.current.paused) {
-        setCurrentAudioTime(audioRef.current.currentTime);
+      const now = performance.now();
+      if (now - lastUpdate.current > 100) {
+        lastUpdate.current = now;
+        if (audioRef.current && !audioRef.current.paused) {
+          setCurrentAudioTime(audioRef.current.currentTime);
+        }
       }
-      frameId = requestAnimationFrame(updateAudioTime);
+      requestAnimationFrame(updateAudioTime);
     };
-
-    frameId = requestAnimationFrame(updateAudioTime);
-
-    return () => cancelAnimationFrame(frameId);
+    updateAudioTime();
   }, []);
 
   // --- New Recording Segment Functions ---
@@ -418,7 +417,7 @@ export default function CourtroomScene({
       // Trigger the start process only once
       if (currentIndex === -1) {
         // Set the flag indicating the user has triggered playback.
-        setplayTriggered(true);
+        setPlayTriggered(true);
         // Do NOT start runPlayback() yet; the judge intro will handle it.
         setCurrentIndex(startFromIndex); // This helps update the UI (if needed)
 
@@ -620,9 +619,9 @@ export default function CourtroomScene({
   const characterStyleMapping = useMemo(() => {
     const mapping = {};
     lines.forEach(({ line_obj }) => {
-      const { role, style } = line_obj;
-      if (role && style && !mapping[role]) {
-        mapping[role] = style;
+      const { character_id, style } = line_obj;
+      if (character_id && style && !mapping[character_id]) {
+        mapping[character_id] = style;
       }
     });
     // console.log("✅ Final style mapping from DB:", mapping);
@@ -630,7 +629,7 @@ export default function CourtroomScene({
   }, [lines]);
 
   const getStyleForCharacter = (id, role) => {
-    const key = role || id;
+    const key = id;
     if (characterStyleMapping[key]) {
       return characterStyleMapping[key];
     }

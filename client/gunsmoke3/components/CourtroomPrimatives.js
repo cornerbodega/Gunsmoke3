@@ -23,7 +23,7 @@ export function Box({ position, rotation, args, color = "#5b3b1d", ...props }) {
       {...props}
     >
       <boxGeometry args={args} />
-      <meshStandardMaterial color={color} roughness={0.6} metalness={0.1} />
+      <meshStandardMaterial color={color} roughness={0.5} metalness={0} />
     </mesh>
   );
 }
@@ -31,7 +31,7 @@ export function Box({ position, rotation, args, color = "#5b3b1d", ...props }) {
 export const Floor = () => (
   <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow>
     <planeGeometry args={[40, 40]} />
-    <meshStandardMaterial color="#6b4b2a" roughness={0.6} metalness={0.1} />
+    <meshStandardMaterial color="#6b4b2a" roughness={0.5} metalness={0} />
   </mesh>
 );
 
