@@ -108,6 +108,29 @@ export default function ScenesPage({ scenes }) {
                   {scene.metadata.summary}
                 </p>
               )}
+
+              <form
+                action="/api/create-chapters"
+                method="POST"
+                target="_blank"
+                style={{ marginTop: "8px" }}
+              >
+                <input type="hidden" name="scene_id" value={scene.scene_id} />
+                <button
+                  type="submit"
+                  style={{
+                    fontSize: "0.9rem",
+                    background: "none",
+                    border: "none",
+                    color: "#9fd3ff",
+                    textDecoration: "underline",
+                    cursor: "pointer",
+                    padding: 0,
+                  }}
+                >
+                  📚 Download Chapters (.txt)
+                </button>
+              </form>
             </li>
           ))}
         </ul>

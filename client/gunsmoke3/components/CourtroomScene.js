@@ -325,6 +325,20 @@ export default function CourtroomScene({
       }
     });
   };
+  useEffect(() => {
+    let frameId;
+
+    const updateAudioTime = () => {
+      if (audioRef.current && !audioRef.current.paused) {
+        setCurrentAudioTime(audioRef.current.currentTime);
+      }
+      frameId = requestAnimationFrame(updateAudioTime);
+    };
+
+    frameId = requestAnimationFrame(updateAudioTime);
+
+    return () => cancelAnimationFrame(frameId);
+  }, []);
 
   // --- New Recording Segment Functions ---
   const startRecordingSegment = () => {

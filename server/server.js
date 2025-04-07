@@ -63,6 +63,7 @@ const app = express();
 const port = 3001;
 
 app.use(cors());
+app.use(express.json());
 
 const upload = multer({
   dest: "uploads/",
@@ -1458,6 +1459,184 @@ app.post("/convert", upload.single("video"), (req, res) => {
       res.status(500).send("Conversion failed");
     })
     .save(outputPath);
+});
+
+app.get("/create-chapters/:sceneId", async (req, res) => {
+  const { sceneId } = req.params;
+
+  try {
+    const rows = await getAllLinesForScene(sceneId);
+
+    if (!rows.length) {
+      return res.status(404).json({ error: "No lines found for this scene." });
+    }
+
+    // Step 1: Calculate timestamps
+    let currentTime = 0;
+    const timedLines = rows.map((row) => {
+      const pause = row.line_obj.pause_before || 0;
+      const duration = row.line_obj.viseme_data?.duration || 5.0; // fallback if no duration
+      const start = currentTime + pause;
+      currentTime = start + duration;
+
+      return {
+        line_id: row.line_id,
+        character_id: row.line_obj.character_id,
+        text: row.line_obj.text,
+        timestamp: start,
+      };
+    });
+
+    // Step 2: Group into chapters (every 60 seconds for now)
+    const CHAPTER_INTERVAL = 60; // seconds
+    const chapters = [];
+    let lastMark = 0;
+    let chapterLines = [];
+
+    for (const line of timedLines) {
+      if (
+        line.timestamp - lastMark >= CHAPTER_INTERVAL &&
+        chapterLines.length
+      ) {
+        const startTime = formatTime(chapterLines[0].timestamp);
+        chapters.push({
+          time: startTime,
+          title: chapterLines[0].text.slice(0, 40).replace(/\n/g, " ") + "...",
+        });
+        lastMark = chapterLines[0].timestamp;
+        chapterLines = [];
+      }
+      chapterLines.push(line);
+    }
+
+    // Final chapter
+    if (chapterLines.length) {
+      const startTime = formatTime(chapterLines[0].timestamp);
+      chapters.push({
+        time: startTime,
+        title: chapterLines[0].text.slice(0, 40).replace(/\n/g, " ") + "...",
+      });
+    }
+
+    // Step 3: Format as YouTube-compatible .txt
+    const output = chapters.map((c) => `${c.time} ${c.title}`).join("\n");
+
+    res.setHeader("Content-Type", "text/plain");
+    res.send(output);
+  } catch (err) {
+    console.error("❌ Error creating chapters:", err.message);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+// Helper to format seconds into HH:MM:SS
+function formatTime(seconds) {
+  const hrs = Math.floor(seconds / 3600);
+  const mins = Math.floor((seconds % 3600) / 60);
+  const secs = Math.floor(seconds % 60);
+  return [hrs, mins, secs].map((n) => String(n).padStart(2, "0")).join(":");
+}
+
+app.post("/create-chapters", async (req, res) => {
+  const { scene_id } = req.body;
+  if (!scene_id) {
+    return res.status(400).json({ error: "Missing scene_id in body." });
+  }
+  const rows = await getAllLinesForScene(scene_id);
+  if (!rows.length) {
+    return res.status(404).json({ error: "No lines found for this scene." });
+  }
+  const totalDuration = 11.5 * 60 * 60; // // 11.5 hours
+  const chapters = [];
+  const chapterDuration = 30 * 60; // 30 minutes
+  const numChapters = Math.ceil(totalDuration / chapterDuration);
+  const linesPerChapter = Math.ceil(rows.length / numChapters);
+  console.log(
+    `Total lines: ${rows.length}, Lines per chapter: ${linesPerChapter}`
+  );
+  console.log(
+    `Total chapters: ${numChapters}, Chapter duration: ${chapterDuration}`
+  );
+  console.log(`Total duration: ${totalDuration}`);
+  console.log(`Chapter duration: ${chapterDuration}`);
+  console.log(`Lines per chapter: ${linesPerChapter}`);
+  console.log(`Number of chapters: ${numChapters}`);
+  console.log(`Rows: ${JSON.stringify(rows, null, 2)}`);
+  console.log(`Rows length: ${rows.length}`);
+
+  for (let i = 0; i < numChapters; i++) {
+    // get from open ai the summary for the chapter
+    const startLine = i * linesPerChapter;
+    const endLine = Math.min((i + 1) * linesPerChapter, rows.length);
+    const chapterLines = rows.slice(startLine, endLine);
+    const chapterText = chapterLines.map((row) => row.line_obj.text).join("\n");
+    const prompt = `
+You are a legal analyst. Given the following lines from a courtroom transcript, summarize the chapter in 1-2 sentences. Do not include any speaker labels or timestamps.
+    ${chapterText}
+
+    Chapter summary:
+    `;
+    console.log(`Prompt for chapter ${i + 1}:`, prompt);
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [{ role: "system", content: prompt }],
+    });
+    const summary = response.choices[0].message.content.trim();
+    chapters.push({
+      startLine,
+      endLine,
+      summary,
+    });
+    console.log(`Chapter ${i + 1} summary:`, summary);
+  }
+  function formatTimestamp(seconds) {
+    const hrs = Math.floor(seconds / 3600)
+      .toString()
+      .padStart(2, "0");
+    const mins = Math.floor((seconds % 3600) / 60)
+      .toString()
+      .padStart(2, "0");
+    const secs = (seconds % 60).toString().padStart(2, "0");
+    return `${hrs}:${mins}:${secs}`;
+  }
+
+  const output = chapters
+    .map((c, i) => {
+      const timestamp = formatTimestamp(i * chapterDuration);
+      return `${timestamp} ${c.summary}`;
+    })
+    .join("\n");
+
+  res.setHeader("Content-Type", "text/plain");
+  console.log(`Output for chapters:`, output);
+
+  const chapterTitlePrompt = `
+  You are a creative editor for legal video content. Below is a list of timestamped summaries from a courtroom transcript. Rewrite this list by replacing the summaries with *chapter titles only* — short, compelling, and cohesive with narrative flow. Think of it like titling a documentary series: make each title unique, interconnected, and engaging, but still professional.
+  
+  Do not include summaries or extra explanation. Keep the exact same timestamp format.
+  
+  Example:
+  00:00 Opening Moves  
+  00:30 The Witness Takes the Stand  
+  ...
+  
+  Here is the original list:
+  ${output}
+  
+  Now rewrite it with chapter titles only:
+  `;
+
+  const refinedResponse = await openai.chat.completions.create({
+    model: "gpt-4o-mini",
+    messages: [{ role: "system", content: chapterTitlePrompt }],
+  });
+
+  const tocOutput = refinedResponse.choices[0].message.content.trim();
+  console.log("Generated chapter titles:\n", tocOutput);
+
+  res.setHeader("Content-Type", "text/plain");
+  res.send(tocOutput);
 });
 
 app.listen(port, () => {
