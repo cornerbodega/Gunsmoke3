@@ -118,7 +118,7 @@ export default function MouthViseme({
       setCurrentTexture(textureMap.M);
     }
   }, [visemeData, textureMap]);
-  const delta = 0.1; // Adjust this value to control the time window for viseme detection
+  const delta = 0.15; // Adjust this value to control the time window for viseme detection
   const getVisemeForTime = (time) => {
     if (!visemeData?.frames?.length) return "rest";
     for (let i = 0; i < visemeData.frames.length; i++) {
