@@ -669,6 +669,11 @@ Return only the JSON array.
           console.log(
             `✅ Updated character for line ${line_id}: ${name} (${character_id})`
           );
+          sendSlackMessage(
+            `✅ Updated character for line ${line_id}: ${name} (${character_id})`,
+            "success",
+            "script-creation-logs"
+          );
         }
       }
     }
@@ -742,7 +747,11 @@ ${JSON.stringify(
 
       const { zone, camera } = JSON.parse(json);
       console.log(`Zone assignment for line ${line_id}:`, zone, camera);
-
+      sendSlackMessage(
+        `Zone assignment for line ${line_id}: ${zone}, camera: ${camera}`,
+        "success",
+        "script-creation-logs"
+      );
       const updatedLineObj = {
         ...line_obj,
         zone,
