@@ -361,9 +361,19 @@ export default function CourtroomScene({
       } catch (e) {
         console.error("❌ Failed to reconnect audio for recording:", e);
       }
+    } else {
+      console.warn("❌ Audio source or context not available for recording.");
+      sendSlackMessage(
+        "❌ Audio source or context not available for recording."
+      );
     }
 
-    if (!canvasRef.current || !audioDestRef.current) return;
+    if (!canvasRef.current || !audioDestRef.current) {
+      sendSlackMessage(
+        "❌ No canvas or audio destination available for recording."
+      );
+      return console.log(`❌ No canvas or audio destination available`);
+    }
     const canvasStream = canvasRef.current.captureStream(60);
     const audioStream = audioDestRef.current.stream;
     const combinedStream = new MediaStream([
@@ -398,6 +408,10 @@ export default function CourtroomScene({
         mediaRecorder.current.stop();
         console.log("Segment recording stopped.");
       } else {
+        console.log("❌ No recording in progress.");
+        sendSlackMessage(
+          "❌ No recording in progress. Segment recording stopped."
+        );
         resolve(null);
       }
     });

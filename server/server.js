@@ -810,6 +810,8 @@ async function generateTTS({
   debug = false,
   audioFormat = "LINEAR16",
 }) {
+  console.log(`🔊 Generating TTS for line ${lineIndex + 1}...`);
+
   if (!text || !voiceName || !sceneId) {
     throw new Error(
       "Missing required TTS parameters: text, voiceName, sceneId."
@@ -839,6 +841,12 @@ async function generateTTS({
   try {
     [response] = await client.synthesizeSpeech(request);
   } catch (err) {
+    sendSlackMessage(
+      `❌ TTS generation error for line ${lineIndex + 1}: ${err.message}`,
+      "error",
+      "script-creation-logs"
+    );
+
     console.error("Google TTS failed:", err);
     throw new Error(`TTS generation failed for line ${lineIndex + 1}`);
   }
@@ -846,9 +854,15 @@ async function generateTTS({
   const { audioContent, timepoints = [] } = response;
 
   if (!audioContent) {
+    sendSlackMessage(
+      `❌ No audio content returned from TTS for line ${lineIndex + 1}`,
+      "error",
+      "script-creation-logs"
+    );
     throw new Error(`No audio content returned from TTS for: "${cleanedText}"`);
   }
 
+  // Upload audio to GCS
   const audioUrl = await uploadToGCS(audioContent, destinationPath);
 
   if (debug) {
@@ -904,15 +918,33 @@ function alignVisemesWithTimings(text, timepoints, cmuDict) {
 
 async function generateAudioAndVisemes(sceneId) {
   try {
+    //todo: delete lines with no text
     // Fetch all lines using pagination
     const rows = await getAllLinesForScene(sceneId);
-
+    console.log(
+      `📦 generateAudioAndVisemes Fetched ${rows.length} rows for scene ${sceneId}`
+    );
+    sendSlackMessage(
+      `📦 generateAudioAndVisemes Fetched ${rows.length} rows for scene ${sceneId}`,
+      "info",
+      "script-creation-logs"
+    );
     for (const row of rows) {
       const { line_id, line_obj } = row;
       const { text, character_id } = line_obj;
       line_obj.voice = assignVoiceForSpeaker(character_id);
 
       const voice = line_obj.voice; // ✅ already injected by metadata process
+      console.log(`Voice for ${character_id}: ${voice}`);
+      console.log(
+        `${JSON.stringify({
+          text,
+          speaker: character_id,
+          voiceName: voice,
+          sceneId,
+          lineIndex: line_id - 1,
+        })}`
+      );
 
       // 🎙️ Generate TTS
       const { audioUrl, timepoints } = await generateTTS({
@@ -943,9 +975,17 @@ async function generateAudioAndVisemes(sceneId) {
           `❌ Failed to update line ${line_id}:`,
           updateErr.message
         );
+        sendSlackMessage(
+          `❌ Failed to update line ${line_id}: ${updateErr.message}`,
+          "error",
+          "script-creation-logs"
+        );
       } else {
         sendSlackMessage(
-          `✅ Updated line ${line_id} with audio and visemes`,
+          `✅ Updated line ${line_id} of ${rows.length} = ${(
+            (line_id / rows.length) *
+            100
+          ).toFixed(2)}% with audio and visemes`,
           "success",
           "script-creation-logs"
         );
@@ -954,6 +994,11 @@ async function generateAudioAndVisemes(sceneId) {
     }
 
     console.log("🎉 All audio and viseme updates complete.");
+    sendSlackMessage(
+      `🎉 All audio and viseme updates complete.`,
+      "success",
+      "script-creation-logs"
+    );
   } catch (err) {
     console.error("🚨 Error during audio + viseme generation:", err.message);
   }
@@ -1560,7 +1605,7 @@ app.get("/redo-audio/:sceneId", async (req, res) => {
     `✅ Audio re-generation completed for scene ${req.params.sceneId}`
   );
   sendSlackMessage(
-    `🔄 Re-generating audio for scene ${req.params.sceneId}`,
+    `🔄 Done re-generating audio for scene ${req.params.sceneId}`,
     "success",
     "script-creation-logs"
   );
