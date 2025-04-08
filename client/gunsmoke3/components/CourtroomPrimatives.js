@@ -7,13 +7,21 @@ import React, {
   useImperativeHandle,
 } from "react";
 import { useLoader, useFrame } from "@react-three/fiber";
-import { Cylinder } from "@react-three/drei";
+import { Cylinder, RoundedBox } from "@react-three/drei";
 import * as THREE from "three";
 import { TextureLoader } from "three";
 import MouthViseme from "@/components/MouthViseme";
 import Nameplate from "@/components/Nameplate";
 // Reusable box mesh
-export function Box({ position, rotation, args, color = "#5b3b1d", ...props }) {
+export function Box({
+  position,
+  rotation,
+  args,
+  color = "#5b3b1d",
+  radius = 0.05, // how round the corners are
+  smoothness = 4, // how smooth the roundness is
+  ...props
+}) {
   return (
     <mesh
       position={position}
@@ -22,8 +30,9 @@ export function Box({ position, rotation, args, color = "#5b3b1d", ...props }) {
       receiveShadow
       {...props}
     >
-      <boxGeometry args={args} />
-      <meshStandardMaterial color={color} roughness={0.5} metalness={0} />
+      <RoundedBox args={args} radius={radius} smoothness={smoothness}>
+        <meshStandardMaterial color={color} roughness={0.5} metalness={0} />
+      </RoundedBox>
     </mesh>
   );
 }
