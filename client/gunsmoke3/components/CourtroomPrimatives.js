@@ -18,22 +18,23 @@ export function Box({
   rotation,
   args,
   color = "#5b3b1d",
-  radius = 0.05, // how round the corners are
-  smoothness = 4, // how smooth the roundness is
+  radius = 0.05,
+  smoothness = 4,
   ...props
 }) {
   return (
-    <mesh
+    <RoundedBox
       position={position}
       rotation={rotation}
+      args={args}
+      radius={radius}
+      smoothness={smoothness}
       castShadow
       receiveShadow
       {...props}
     >
-      <RoundedBox args={args} radius={radius} smoothness={smoothness}>
-        <meshStandardMaterial color={color} roughness={0.5} metalness={0} />
-      </RoundedBox>
-    </mesh>
+      <meshStandardMaterial color={color} roughness={0.5} metalness={0} />
+    </RoundedBox>
   );
 }
 
