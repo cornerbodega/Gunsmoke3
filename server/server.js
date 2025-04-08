@@ -1462,7 +1462,7 @@ app.post("/convert", upload.single("video"), (req, res) => {
       sendSlackMessage(
         `FFmpeg success: ${outputPath}`,
         "success",
-        "script-creation-logs"
+        "courtroom-scene-logs"
       );
       fs.unlinkSync(inputPath);
       res.json({ message: "Video segment converted and saved" });
@@ -1472,7 +1472,7 @@ app.post("/convert", upload.single("video"), (req, res) => {
       sendSlackMessage(
         `FFmpeg error: ${err.message || err}`,
         "error",
-        "script-creation-logs"
+        "courtroom-scene-logs"
       );
       if (fs.existsSync(inputPath)) fs.unlinkSync(inputPath);
       res.status(500).send("Conversion failed");
@@ -1548,6 +1548,24 @@ app.get("/create-chapters/:sceneId", async (req, res) => {
   }
 });
 
+app.get("/redo-audio/:sceneId", async (req, res) => {
+  console.log(`🔄 Re-generating audio for scene ${req.params.sceneId}`);
+  sendSlackMessage(
+    `🔄 Re-generating audio for scene ${req.params.sceneId}`,
+    "info",
+    "script-creation-logs"
+  );
+  await generateAudioAndVisemes(req.params.sceneId);
+  console.log(
+    `✅ Audio re-generation completed for scene ${req.params.sceneId}`
+  );
+  sendSlackMessage(
+    `🔄 Re-generating audio for scene ${req.params.sceneId}`,
+    "success",
+    "script-creation-logs"
+  );
+  res.json({ message: "Audio re-generation triggered." });
+});
 // Helper to format seconds into HH:MM:SS
 function formatTime(seconds) {
   const hrs = Math.floor(seconds / 3600);
