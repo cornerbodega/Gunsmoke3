@@ -386,7 +386,9 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
         line_obj: lineObj,
       };
 
-      await saveToSupabase("gs3_lines", lineData).catch((error) =>
+      await saveToSupabase("gs3_lines", lineData, {
+        onConflict: ["scene_id", "line_id"],
+      }).catch((error) =>
         console.error(`❌ Error saving line ${i + 1}:`, error.message)
       );
       console.log(

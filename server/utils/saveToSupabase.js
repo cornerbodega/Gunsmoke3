@@ -1,19 +1,25 @@
 const { createClient } = require("@supabase/supabase-js");
 require("dotenv/config");
 
-const saveToSupabase = async (table, dataToSave) => {
+const saveToSupabase = async (table, dataToSave, options = {}) => {
   const getSupabase = () => {
-    const supabase = createClient(
+    return createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
     );
-    return supabase;
   };
 
   const supabase = getSupabase();
 
   try {
-    const response = await supabase.from(table).insert(dataToSave).select();
+    const query = options.onConflict
+      ? supabase
+          .from(table)
+          .upsert(dataToSave, { onConflict: options.onConflict })
+          .select()
+      : supabase.from(table).insert(dataToSave).select();
+
+    const response = await query;
 
     if (response.error) {
       throw response.error;
@@ -21,8 +27,8 @@ const saveToSupabase = async (table, dataToSave) => {
 
     return response.data;
   } catch (error) {
-    console.error("Error inserting data:", error.message);
+    console.error("❌ Error inserting data into", table, ":", error.message);
   }
 };
 
-module.exports = saveToSupabase; // Use `module.exports` instead of `export default`
+module.exports = saveToSupabase;
