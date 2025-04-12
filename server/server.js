@@ -534,12 +534,12 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
     }));
 
     // Call the batch assignment function
-    // await assignCharactersBatch(sceneId, knownCharacters);
-    // sendSlackMessage(
-    //   `🧠 Characters assigned`,
-    //   "success",
-    //   "script-creation-logs"
-    // );
+    await assignCharactersBatch(sceneId, knownCharacters);
+    sendSlackMessage(
+      `🧠 Characters assigned`,
+      "success",
+      "script-creation-logs"
+    );
 
     const sceneMetadata = {
       scene_id: sceneId,
@@ -602,6 +602,15 @@ For each of the following transcript lines, return an array of JSON objects with
 - "line_id": (number) the line's unique identifier,
 - "name": (string) the character's full name,
 - "character_id": (string) the normalized ID.
+- "role": (string) the character's role in the courtroom.
+
+⚠️ Use context to infer the roles:
+- The **judge** is labeled "THE COURT".
+- The person labeled "A" is the **witness**.
+- The person labeled "Q" is the **lawyer examining the witness**. To determine if they are **prosecutor** or **defense**:
+   - If the lawyer is **calling or continuing with the witness**, especially if the witness is the defendant, they are likely the **defense**.
+   - If another lawyer says **"No objection"** after evidence is offered, they are usually the **opposing party**.
+- Consider who introduced the witness, offered exhibits, or made objections — this can help you identify roles more accurately.
 
 Transcript lines:
 ${batch
@@ -1008,36 +1017,35 @@ async function extractCharactersFromChunk(chunkText, speakerMap) {
   try {
     const prompt = `
     The following is text from a courtroom transcript. Extract all **unique speakers**, and return their:
+    
+    - Full name
+    - Speaker label (e.g., "Q", "A", "THE COURT")
+    - Role (one of these: judge, witness, prosecutor, defense)
+    - A normalized ID (lowercase, no spaces or punctuation — used for database keys)
+    Return an array like:
+    
+    [
+      {
+        "name": "Elizabeth Holmes",
+        "speaker_label": "A",
+        "role": "witness",
+        "id": "elizabethholmes"
+      },
+      {
+        "name": "Jessica Chan",
+        "speaker_label": "Q",
+        "role": "prosecutor",
+        "id": "jessicachan"
+      }
+    ]
 
-- Full name
-- Speaker label (e.g., "Q", "A", "THE COURT")
-- Role (choose from: judge, witness, prosecutor, defense, clerk, jury)
-- A normalized ID (lowercase, no spaces or punctuation — used for database keys)
-
-⚠️ Use context to infer the roles:
+    ⚠️ Use context to infer the roles:
 - The **judge** is labeled "THE COURT".
 - The person labeled "A" is the **witness**.
 - The person labeled "Q" is the **lawyer examining the witness**. To determine if they are **prosecutor** or **defense**:
    - If the lawyer is **calling or continuing with the witness**, especially if the witness is the defendant, they are likely the **defense**.
    - If another lawyer says **"No objection"** after evidence is offered, they are usually the **opposing party**.
 - Consider who introduced the witness, offered exhibits, or made objections — this can help you identify roles more accurately.
-
-Return the result as an array of objects like:
-[
-  {
-    "name": "Elizabeth Holmes",
-    "speaker_label": "A",
-    "role": "witness",
-    "id": "elizabethholmes"
-  },
-  {
-    "name": "Jessica Chan",
-    "speaker_label": "Q",
-    "role": "prosecutor",
-    "id": "jessicachan"
-  }
-]
-    
     ⚠️ Do NOT wrap your response in markdown. Return raw JSON only.
     `;
 
