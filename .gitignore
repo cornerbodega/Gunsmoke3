@@ -5,3 +5,4 @@ client/gunsmoke3/tmp
 .env
 server/uploads/*
 server/videos/*
+client/gunsmoke3/tmp/*

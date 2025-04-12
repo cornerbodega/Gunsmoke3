@@ -225,8 +225,9 @@ export default function CourtroomScene({
   // --- Updated runPlayback for Line-Based Cuts ---
   const runPlayback = async () => {
     const linesToPlay = lines.slice(startFromIndex);
-    for (let i = 0; i < linesToPlay.length; i++) {
+    for (let i = 1; i < linesToPlay.length; i++) {
       const line = linesToPlay[i];
+
       const { line_id, line_obj } = line;
 
       const originalIndex = startFromIndex + i;
@@ -592,7 +593,7 @@ export default function CourtroomScene({
   const zoneMap = {
     judge_sitting_at_judge_bench: {
       position: [0, 2, -18],
-      rotation: [0, -Math.PI, 0],
+      rotation: [0, 0, 0],
     },
     witness_at_witness_stand: {
       position: [-10, 1.1, -15],
@@ -623,7 +624,7 @@ export default function CourtroomScene({
       position: [-7.5, -0.05, -8.5],
       rotation: [0, Math.PI / 1.2, 0],
     },
-    clerk_box: { position: [10, 1, -15], rotation: [0, 0, 0] },
+    clerk_box: { position: [10, 1, -15], rotation: [0, -Math.PI, 0] },
   };
 
   const getLocationPose = (key) =>
@@ -633,9 +634,21 @@ export default function CourtroomScene({
   const characterStyleMapping = useMemo(() => {
     const mapping = {};
     lines.forEach(({ line_obj }) => {
-      const { character_id, style } = line_obj;
+      console.log(`🧑‍⚖️ Processing line:`, line_obj);
+
+      const { character_id, role, style } = line_obj;
       if (character_id && style && !mapping[character_id]) {
-        mapping[character_id] = style;
+        let styleObj = { ...style };
+        // if the role is judge then make clothes black
+        if (role === "judge") {
+          styleObj = {
+            ...style,
+            pants_color: "#000000",
+            shirt_color: "#000000",
+          };
+        }
+
+        mapping[character_id] = styleObj;
       }
     });
     // console.log("✅ Final style mapping from DB:", mapping);
@@ -644,10 +657,19 @@ export default function CourtroomScene({
 
   const getStyleForCharacter = (id, role) => {
     const key = id;
+    console.log(`🧑‍⚖️ Looking up style for ${key}`);
+
     if (characterStyleMapping[key]) {
       return characterStyleMapping[key];
     }
     const presetStyles = {
+      thecourt: {
+        hair_color: "#2e2e2e",
+        hair_style: "bald",
+        skin_color: "#c68642",
+        pants_color: "#000000",
+        shirt_color: "#222222",
+      },
       judge: {
         hair_color: "#2e2e2e",
         hair_style: "bald",
@@ -670,6 +692,8 @@ export default function CourtroomScene({
         shirt_color: "#f0e68c",
       },
     };
+    console.log(`🧑‍⚖️ Style for ${key}:`, presetStyles[key]);
+
     if (presetStyles[key]) {
       return presetStyles[key];
     }
@@ -868,7 +892,7 @@ export default function CourtroomScene({
                               registerCharacter={registerCharacter}
                               lookTargetRef={lookTargetRef}
                               judgeStyle={getStyleForCharacter(
-                                "judge",
+                                "thecourt",
                                 "judge"
                               )}
                               eyeTargetRef={cameraTargetRef}
@@ -975,7 +999,7 @@ export default function CourtroomScene({
                 /> */}
 
                 {/* Clerk (always in clerk_box) */}
-                {/* <Character
+                <Character
                   key="clerk"
                   {...getLocationPose("clerk_box")}
                   onReady={(headRef) =>
@@ -991,7 +1015,7 @@ export default function CourtroomScene({
                     activeSpeakerId,
                     emotion: "neutral",
                   }}
-                /> */}
+                />
 
                 {/* Stenographer (always in stenographer_station) */}
                 <Character

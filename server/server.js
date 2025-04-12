@@ -534,12 +534,12 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
     }));
 
     // Call the batch assignment function
-    await assignCharactersBatch(sceneId, knownCharacters);
-    sendSlackMessage(
-      `🧠 Characters assigned`,
-      "success",
-      "script-creation-logs"
-    );
+    // await assignCharactersBatch(sceneId, knownCharacters);
+    // sendSlackMessage(
+    //   `🧠 Characters assigned`,
+    //   "success",
+    //   "script-creation-logs"
+    // );
 
     const sceneMetadata = {
       scene_id: sceneId,
@@ -1008,27 +1008,35 @@ async function extractCharactersFromChunk(chunkText, speakerMap) {
   try {
     const prompt = `
     The following is text from a courtroom transcript. Extract all **unique speakers**, and return their:
-    
-    - Full name
-    - Speaker label (e.g., "Q", "A", "THE COURT")
-    - Role (one of these: judge, witness, defense1, defense2, prosecutor1, prosecutor2, defendant)
-    - A normalized ID (lowercase, no spaces or punctuation — used for database keys)
-    Return an array like:
-    
-    [
-      {
-        "name": "Elizabeth Holmes",
-        "speaker_label": "A",
-        "role": "defendant",
-        "id": "elizabethholmes"
-      },
-      {
-        "name": "Jessica Chan",
-        "speaker_label": "Q",
-        "role": "prosecutor1",
-        "id": "jessicachan"
-      }
-    ]
+
+- Full name
+- Speaker label (e.g., "Q", "A", "THE COURT")
+- Role (choose from: judge, witness, prosecutor, defense, clerk, jury)
+- A normalized ID (lowercase, no spaces or punctuation — used for database keys)
+
+⚠️ Use context to infer the roles:
+- The **judge** is labeled "THE COURT".
+- The person labeled "A" is the **witness**.
+- The person labeled "Q" is the **lawyer examining the witness**. To determine if they are **prosecutor** or **defense**:
+   - If the lawyer is **calling or continuing with the witness**, especially if the witness is the defendant, they are likely the **defense**.
+   - If another lawyer says **"No objection"** after evidence is offered, they are usually the **opposing party**.
+- Consider who introduced the witness, offered exhibits, or made objections — this can help you identify roles more accurately.
+
+Return the result as an array of objects like:
+[
+  {
+    "name": "Elizabeth Holmes",
+    "speaker_label": "A",
+    "role": "witness",
+    "id": "elizabethholmes"
+  },
+  {
+    "name": "Jessica Chan",
+    "speaker_label": "Q",
+    "role": "prosecutor",
+    "id": "jessicachan"
+  }
+]
     
     ⚠️ Do NOT wrap your response in markdown. Return raw JSON only.
     `;
@@ -1226,51 +1234,6 @@ function assignVoiceForSpeaker(speaker) {
   const index = Math.abs(hashString(speaker)) % availableVoices.length;
   return availableVoices[index];
 }
-// function hashString(str) {
-//   let hash = 0;
-//   for (let i = 0; i < str.length; i++) {
-//     hash = (hash << 5) - hash + str.charCodeAt(i);
-//     hash |= 0;
-//   }
-//   return hash;
-// }
-
-// function assignVoicesForAllSpeakers(speakerMap) {
-//   const availableVoices = [
-//     // "en-US-Wavenet-A",
-//     "en-US-Wavenet-B",
-//     "en-US-Wavenet-C",
-//     "en-US-Wavenet-D",
-//     "en-US-Wavenet-E",
-//     "en-US-Wavenet-F",
-//     "en-US-Wavenet-G",
-//     "en-US-Wavenet-H",
-//     "en-US-Wavenet-I",
-//     "en-US-Wavenet-J",
-//   ];
-
-//   const voiceHistory = []; // rolling window of recent voices
-//   const maxRecent = 3;
-
-//   for (const [id, character] of speakerMap.entries()) {
-//     let voice = availableVoices.find((v) => !voiceHistory.includes(v));
-
-//     if (!voice) {
-//       // fallback: use hash-based selection to keep it stable
-//       const hash = Math.abs(hashString(id));
-//       voice = availableVoices[hash % availableVoices.length];
-//     }
-
-//     // assign and update rolling history
-//     character.voice = voice;
-//     voiceHistory.push(voice);
-//     if (voiceHistory.length > maxRecent) {
-//       voiceHistory.shift(); // keep window size in check
-//     }
-//   }
-
-//   console.log("🔊 Assigned voices (spread):", Object.fromEntries(speakerMap));
-// }
 
 async function analyzeRawDocument(text) {
   const prompt = `

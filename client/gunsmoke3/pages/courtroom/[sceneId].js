@@ -69,6 +69,6 @@ export async function getServerSideProps(context) {
 
 export default function ScenePage({ lines, sceneId }) {
   return (
-    <CourtroomScene lines={lines} sceneId={sceneId} startFromLineId={1107} />
+    <CourtroomScene lines={lines} sceneId={sceneId} startFromLineId={-1} />
   );
 }
