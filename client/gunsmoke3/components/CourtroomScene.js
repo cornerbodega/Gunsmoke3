@@ -624,7 +624,7 @@ export default function CourtroomScene({
       position: [-7.5, -0.05, -8.5],
       rotation: [0, Math.PI / 1.2, 0],
     },
-    clerk_box: { position: [10, 1, -15], rotation: [0, -Math.PI, 0] },
+    clerk_box: { position: [10, 1, -15], rotation: [0, 0, 0] },
   };
 
   const getLocationPose = (key) =>
@@ -999,7 +999,7 @@ export default function CourtroomScene({
                 /> */}
 
                 {/* Clerk (always in clerk_box) */}
-                <Character
+                {/* <Character
                   key="clerk"
                   {...getLocationPose("clerk_box")}
                   onReady={(headRef) =>
@@ -1015,7 +1015,7 @@ export default function CourtroomScene({
                     activeSpeakerId,
                     emotion: "neutral",
                   }}
-                />
+                /> */}
 
                 {/* Stenographer (always in stenographer_station) */}
                 <Character
