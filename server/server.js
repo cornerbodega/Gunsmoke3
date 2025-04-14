@@ -135,7 +135,7 @@ const phonemeToViseme = {
   sil: "rest",
 };
 
-const MAX_CHUNKS = 175;
+const MAX_CHUNKS = 177;
 const textChunkSize = 7000;
 
 function splitBySpeakerAndLength(text, maxChars = 7000) {
@@ -1206,6 +1206,9 @@ async function cleanText(chunkText, speakerMap, lastSpeaker, lastLine) {
     )}. Return dialog only, in the format "Speaker Name: line". Do not explain or summarize. Omit narration or non-dialog text. 
       
       ⚠️ If the transcript includes any redaction codes (such as (b)(6), (b)(7)(C), or similar), replace them with "Redacted". Ensure redacted portions are cleanly replaced and do not break sentence structure.
+
+      Remove any label of Q or A. Replace with character names from the list. Important: use context and judgement to determine the correct speaker. For example, make sure a witness is not questioning themselves. Also, make sure the prosecutor and defense is taking turns asking a series of questions, just like in a real trial.
+      If a witness is asking a question, it's likely a mistake unless it makes sense in context. 
       `;
 
     // const sampleInput = `version, how many tests could it run 18 at that time in 2010? 19 A I don't know exactly what the number was...`;
