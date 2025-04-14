@@ -3,6 +3,7 @@ import { useState } from "react";
 export default function CreateScene() {
   const [pdfText, setPdfText] = useState("");
   const [fullTranscript, setFullTranscript] = useState("");
+  const [lines, setLines] = useState([]);
 
   const handleFileUpload = async (event) => {
     const file = event.target.files?.[0];
@@ -21,6 +22,7 @@ export default function CreateScene() {
       const combinedText = data.cleanedChunks.join("<<<CHUNK_BREAK>>>");
       setPdfText(combinedText);
       setFullTranscript(data.transcript || "");
+      setLines(data.lines || []);
     }
 
     console.log("data");
@@ -56,7 +58,8 @@ export default function CreateScene() {
           cursor: "pointer",
         }}
       />
-
+      {/* lines */}
+      {JSON.stringify(lines)}
       {fullTranscript && (
         <div
           style={{
