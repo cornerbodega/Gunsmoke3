@@ -39,6 +39,9 @@ export default function CourtroomScene({
   lines,
   sceneId,
   startFromLineId = 1,
+  endLineId = lines.length + 1,
+  skipIntro = false,
+  folderName,
 }) {
   const sessionId = useMemo(() => uuidv4(), []);
   // Proxy that supports resolving aliases seamlessly
@@ -50,6 +53,12 @@ export default function CourtroomScene({
     const index = lines.findIndex((line) => line.line_id === startFromLineId);
     return index === -1 ? 0 : index;
   }, [startFromLineId, lines]);
+  const endIndex = useMemo(() => {
+    if (!endLineId) return lines.length;
+    const index = lines.findIndex((line) => line.line_id === endLineId);
+    return index === -1 ? lines.length : index;
+  }, [endLineId, lines]);
+
   const cameraTargetRef = useRef(new THREE.Object3D());
 
   const [currentIndex, setCurrentIndex] = useState(-1);
@@ -249,14 +258,15 @@ export default function CourtroomScene({
   // --- Helper: runPlayback ---
   // --- Updated runPlayback for Line-Based Cuts ---
   const runPlayback = async () => {
-    const linesToPlay = lines.slice(startFromIndex);
-    for (let i = 1; i < linesToPlay.length; i++) {
-      const line = linesToPlay[i];
-
+    // Note: this only works for one line start end inclusive. it doens't allow for the intro and anything else to be played together.
+    console.log(`📜 Starting playback from line ${startFromIndex}`);
+    for (let i = startFromIndex; i <= endIndex; i++) {
+      const line = lines[i];
+      if (!line || line.line_id === 0) continue; // ⬅️ Skip introLine (handled elsewhere)
       const { line_id, line_obj } = line;
 
       const originalIndex = startFromIndex + i;
-      setCurrentIndex(originalIndex); // so UI reflects correct index in the full list
+      setCurrentIndex(i); // so UI reflects correct index in the full list
       setActiveSpeakerId(line_obj.character_id);
 
       // later inside your loop:
@@ -340,13 +350,17 @@ export default function CourtroomScene({
         formData.append("sessionId", sessionId);
         formData.append("line_id", line_id);
         formData.append("sceneId", sceneId);
-
+        formData.append("folderName", folderName);
         try {
-          fetch("http://localhost:3001/convert", {
+          await fetch("http://localhost:3001/convert", {
             method: "POST",
             body: formData,
           });
+
           console.log(`✅ MP4 uploaded for line_id ${line_id}`);
+          if (i === endIndex) {
+            console.log(`<<Close Virtual Browser>>`);
+          }
         } catch (err) {
           console.error("❌ Upload or conversion failed:", err);
         }
@@ -513,18 +527,23 @@ export default function CourtroomScene({
         return console.log("❌ Not ready to start recording");
       }
       // Trigger the start process only once
-      if (currentIndex === -1) {
-        // Set the flag indicating the user has triggered playback.
-        setPlayTriggered(true);
-        // Do NOT start runPlayback() yet; the judge intro will handle it.
-        setCurrentIndex(startFromIndex); // This helps update the UI (if needed)
 
-        // Resume AudioContext if it is suspended.
+      if (currentIndex === -1) {
+        setPlayTriggered(true);
+        setCurrentIndex(startFromIndex);
+
         if (
           audioContextRef.current &&
           audioContextRef.current.state === "suspended"
         ) {
           await audioContextRef.current.resume();
+        }
+        console.log(`enter: skipIntro: ${skipIntro}`);
+
+        if (skipIntro) {
+          console.log("⏭️ Skipping intro, starting playback immediately");
+          setIntroPlaying(false);
+          runPlayback(); // 👈 start immediately
         }
       }
     };
@@ -972,12 +991,14 @@ export default function CourtroomScene({
                           return (
                             <JudgeIntroAnimation
                               key="judge-intro"
+                              folderName={folderName}
                               registerCharacter={registerCharacter}
                               lookTargetRef={lookTargetRef}
                               judgeStyle={getStyleForCharacter(
                                 "thecourt",
                                 "judge"
                               )}
+                              endIndex={endIndex}
                               eyeTargetRef={cameraTargetRef}
                               introPlaying={introPlaying}
                               startIntroRecording={startIntroRecording}
@@ -1237,12 +1258,14 @@ function useResolvedCharacterRefs(rawRef, aliasMap) {
       },
     });
   }, [aliasMap]);
+  a;
 }
 
 function JudgeIntroAnimation({
   onComplete,
   lookTargetRef,
   judgeStyle,
+  folderName,
   resolvedCharacterRefs,
   registerCharacter,
   startIntroRecording,
@@ -1252,15 +1275,16 @@ function JudgeIntroAnimation({
   introPlaying,
   eyeTargetRef,
   sessionId,
+  endIndex,
   sceneId,
-  ready,
 }) {
   const judgeRef = useRef();
   const introStartedRef = useRef(false);
+  const hasCompletedRef = useRef(false); // ✅ Prevent multiple onComplete calls
+  const clock = useRef(new THREE.Clock());
 
   const [finalRotation, setFinalRotation] = useState([0, 0, 0]);
-  const clock = useRef(new THREE.Clock());
-  // console.log(`judgeStyle`, judgeStyle);
+
   const waypoints = [
     new THREE.Vector3(0, 0, 12), // Entrance
     new THREE.Vector3(1, 0, -8), // Up the aisle
@@ -1273,49 +1297,42 @@ function JudgeIntroAnimation({
 
   const curve = new THREE.CatmullRomCurve3(waypoints);
 
-  // Define camera start and end positions.
   const camStart = new THREE.Vector3(0, 1.5, 15);
   const camEnd = new THREE.Vector3(0, 4, -10);
+  const walkDelay = 0;
+  const duration = 14;
 
-  const walkDelay = 0; // wait before walking
-  const duration = 14; // walk duration
-
+  // Start intro playback and recording once
   useEffect(() => {
     if (playTriggered && introPlaying && !introStartedRef.current) {
       console.log("▶️ Triggering intro from useEffect");
+      introStartedRef.current = true;
       startIntroRecording();
+
       playIntroAudio("/intro_music.mp3")
         .then(() => console.log("🎵 Done playing intro music"))
         .catch((err) => console.error("❌ Intro audio error:", err));
-      introStartedRef.current = true;
     }
   }, [playTriggered, introPlaying]);
 
+  // Animation loop
   useFrame(({ camera }) => {
     const elapsed = clock.current.getElapsedTime();
-    const walkElapsed = Math.max(0, elapsed - walkDelay); // delay start
+    const walkElapsed = Math.max(0, elapsed - walkDelay);
     const t = Math.min(walkElapsed / duration, 1);
-    const easedT = t * t * (3 - 2 * t); // ease-in-out
+    const easedT = t * t * (3 - 2 * t); // Ease-in-out
 
-    // Get the current position along the curve.
     const position = curve.getPoint(easedT);
-    // Get the tangent to the curve (the direction of movement).
     const tangent = curve.getTangent(easedT);
-
-    // Instead of computing an angle, compute a target point ahead along the tangent.
     const lookAtTarget = position.clone().add(tangent);
 
     if (judgeRef.current) {
-      // Update the position of the judge.
       judgeRef.current.position.copy(position);
-      // Create a modified target with the same y-level as the judge,
-      // ensuring the rotation only affects the yaw.
-      const targetWithoutY = lookAtTarget.clone();
-      targetWithoutY.y = position.y;
-      judgeRef.current.lookAt(targetWithoutY);
+      const targetFlat = lookAtTarget.clone();
+      targetFlat.y = position.y;
+      judgeRef.current.lookAt(targetFlat);
     }
 
-    // Optionally update the global lookTarget if needed:
     if (
       t < 1 &&
       lookTargetRef?.current &&
@@ -1327,46 +1344,43 @@ function JudgeIntroAnimation({
       lookTargetRef.current.position.copy(targetPos);
     }
 
-    // Camera adjustments remain unchanged.
-    const lookAtOffset = new THREE.Vector3(0, 1.5, 0);
-    camera.lookAt(position.clone().add(lookAtOffset));
+    const lookOffset = new THREE.Vector3(0, 1.5, 0);
     const camPos = camStart.clone().lerp(camEnd, easedT);
     camera.position.copy(camPos);
-    camera.lookAt(position.clone().add(lookAtOffset));
+    camera.lookAt(position.clone().add(lookOffset));
 
-    if (t >= 1 && onComplete) {
-      stopIntroRecording().then((blob) => {
+    // Only trigger onComplete once
+    if (t >= 1 && !hasCompletedRef.current) {
+      hasCompletedRef.current = true;
+
+      stopIntroRecording().then(async (blob) => {
         if (blob) {
           const formData = new FormData();
-          // You can name this file differently, e.g., "intro_segment.webm"
           formData.append("video", blob, `intro_segment.webm`);
           formData.append("sessionId", sessionId);
           formData.append("sceneId", sceneId);
+          formData.append("folderName", folderName);
 
           try {
-            fetch("http://localhost:3001/convert", {
+            await fetch("http://localhost:3001/convert", {
               method: "POST",
               body: formData,
             });
+            if (endIndex === 0) {
+              console.log("<<Close Virtual Browser>>");
+            }
             console.log("✅ Intro segment uploaded.");
           } catch (err) {
             console.error("❌ Upload of intro segment failed:", err);
           }
         }
-        onComplete();
-        onComplete = null;
+
+        onComplete?.(); // Safely trigger onComplete
       });
     }
   });
-  // Start intro recording exactly once when canvas is ready and intro is about to play
-  // useEffect(() => {
-  //   if (ready && playTriggered && introPlaying && !introRecordingStarted) {
-  //     console.log("🔔 Triggering intro recording via effect");
-  //     startIntroRecording();
-  //     setIntroRecordingStarted(true);
-  //   }
-  // }, [ready, playTriggered, introPlaying, introRecordingStarted]);
 
+  // Debug log
   useEffect(() => {
     console.log("JudgeIntroAnimation judgeStyle:", judgeStyle);
   }, [judgeStyle]);
@@ -1381,7 +1395,7 @@ function JudgeIntroAnimation({
           style: judgeStyle,
           sitting: false,
           rotation: finalRotation,
-          eyeTargetRef: eyeTargetRef,
+          eyeTargetRef,
           speakerTargetRef: new THREE.Object3D(),
           activeSpeakerId: null,
           emotion: "angry",
