@@ -135,7 +135,7 @@ const phonemeToViseme = {
   sil: "rest",
 };
 
-const MAX_CHUNKS = 177;
+const MAX_CHUNKS = 343;
 const textChunkSize = 7000;
 
 function splitBySpeakerAndLength(text, maxChars = 7000) {

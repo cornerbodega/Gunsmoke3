@@ -3,4 +3,7 @@ for f in $(ls *.mp4 | sort -n -t. -k1); do
   echo "file '$f'" >> filelist.txt
 done
 
-ffmpeg -f concat -safe 0 -i filelist.txt -c copy output.mp4
+//ffmpeg -f concat -safe 0 -i filelist.txt -c copy output.mp4
+
+
+ffmpeg -f concat -safe 0 -i filelist.txt -c:v libx264 -preset fast -crf 23 -c:a aac -b:a 192k output.mp4
