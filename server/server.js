@@ -789,7 +789,7 @@ async function assignCharactersBatch(sceneId, knownCharacters, batchSize = 10) {
   //     console.error("🚨 Error during batch character assignment:", err.message);
   //   }
 }
-
+// Todo: un-ai this!! this should just be a mapping with some randomness in the camera angle choice
 async function assignZones(sceneId) {
   try {
     // Fetch all lines using pagination
