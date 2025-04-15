@@ -625,7 +625,7 @@ export default function CourtroomScene({
       position: [-7.5, -0.05, -8.5],
       rotation: [0, Math.PI / 1.2, 0],
     },
-    clerk_box: { position: [10, 1, -15], rotation: [0, 0, 0] },
+    clerk_box: { position: [10, 1, -15], rotation: [0, Math.PI, 0] },
   };
 
   const getLocationPose = (key) =>
