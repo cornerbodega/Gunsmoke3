@@ -221,6 +221,30 @@ export default function CourtroomScene({
       audio.play().catch(onError);
     });
   };
+  async function analyzeAmplitude(audioUrl, sliceDuration = 0.05) {
+    const res = await fetch(audioUrl);
+    const buffer = await res.arrayBuffer();
+
+    const ctx = new (window.OfflineAudioContext ||
+      window.webkitOfflineAudioContext)(1, 44100 * 40, 44100);
+
+    const decoded = await ctx.decodeAudioData(buffer);
+    const samples = decoded.getChannelData(0);
+
+    const sliceSize = Math.floor(decoded.sampleRate * sliceDuration);
+    const result = [];
+
+    for (let i = 0; i < samples.length; i += sliceSize) {
+      let sum = 0;
+      for (let j = 0; j < sliceSize && i + j < samples.length; j++) {
+        sum += Math.abs(samples[i + j]);
+      }
+      const avg = sum / sliceSize;
+      result.push({ time: i / decoded.sampleRate, amplitude: avg });
+    }
+
+    return result;
+  }
 
   // --- Helper: runPlayback ---
   // --- Updated runPlayback for Line-Based Cuts ---
@@ -243,7 +267,65 @@ export default function CourtroomScene({
       // Start a new recording segment for this line.
       console.log(`🎤 Starting recording for line ${line_id}`);
 
+      const audioUrl = `/api/audio-proxy?url=${encodeURIComponent(
+        line_obj.audio_url
+      )}`;
+      const amplitudeData = await analyzeAmplitude(audioUrl);
+
+      // Inject silence visemes into the data
+      const silenceThreshold = 0.02;
+      const augmentedVisemeData = amplitudeData.map(({ time, amplitude }) => ({
+        time,
+        viseme: amplitude < silenceThreshold ? "sil" : null, // null means let model handle it
+      }));
+
+      function mergeVisemes(
+        modelFrames = [],
+        amplitudeFrames = [],
+        silenceViseme = "rest", // or "sil"
+        amplitudeThreshold = 0.0075,
+        holdDuration = 0.14 // how long a viseme can last before fallback
+      ) {
+        const merged = [];
+        let modelIndex = 0;
+        let lastModelViseme = silenceViseme;
+        let lastModelTime = 0;
+
+        for (let i = 0; i < amplitudeFrames.length; i++) {
+          const { time, amplitude } = amplitudeFrames[i];
+
+          // Advance model frame if its time has passed
+          while (
+            modelIndex < modelFrames.length &&
+            modelFrames[modelIndex].time <= time
+          ) {
+            lastModelViseme = modelFrames[modelIndex].viseme;
+            lastModelTime = modelFrames[modelIndex].time;
+            modelIndex++;
+          }
+
+          const timeSinceViseme = time - lastModelTime;
+          const isSilent = amplitude < amplitudeThreshold;
+          const useSilence = isSilent || timeSinceViseme > holdDuration;
+
+          const viseme = useSilence ? silenceViseme : lastModelViseme;
+
+          const last = merged[merged.length - 1];
+          if (!last || last.viseme !== viseme) {
+            merged.push({ time, viseme });
+          }
+        }
+
+        return merged;
+      }
+
+      // Combine with existing viseme data from DB
+      line_obj.viseme_data = {
+        frames: mergeVisemes(line_obj.viseme_data?.frames, amplitudeData),
+      };
+
       startRecordingSegment();
+
       await playLineAudio(line_id, line_obj.audio_url);
 
       const pause = line_obj.pause_before ?? 0.5;
