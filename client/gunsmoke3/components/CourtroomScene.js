@@ -1000,7 +1000,7 @@ export default function CourtroomScene({
                 /> */}
 
                 {/* Clerk (always in clerk_box) */}
-                {/* <Character
+                <Character
                   key="clerk"
                   {...getLocationPose("clerk_box")}
                   onReady={(headRef) =>
@@ -1016,7 +1016,7 @@ export default function CourtroomScene({
                     activeSpeakerId,
                     emotion: "neutral",
                   }}
-                /> */}
+                />
 
                 {/* Stenographer (always in stenographer_station) */}
                 <Character
