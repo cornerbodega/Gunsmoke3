@@ -717,7 +717,7 @@ export default function CourtroomScene({
   const characterStyleMapping = useMemo(() => {
     const mapping = {};
     lines.forEach(({ line_obj }) => {
-      console.log(`🧑‍⚖️ Processing line:`, line_obj);
+      // console.log(`🧑‍⚖️ Processing line:`, line_obj);
 
       const { character_id, role, style } = line_obj;
       if (character_id && style && !mapping[character_id]) {
@@ -740,7 +740,7 @@ export default function CourtroomScene({
 
   const getStyleForCharacter = (id, role) => {
     const key = id;
-    console.log(`🧑‍⚖️ Looking up style for ${key}`);
+    // console.log(`🧑‍⚖️ Looking up style for ${key}`);
 
     if (characterStyleMapping[key]) {
       return characterStyleMapping[key];
@@ -775,7 +775,7 @@ export default function CourtroomScene({
         shirt_color: "#f0e68c",
       },
     };
-    console.log(`🧑‍⚖️ Style for ${key}:`, presetStyles[key]);
+    // console.log(`🧑‍⚖️ Style for ${key}:`, presetStyles[key]);
 
     if (presetStyles[key]) {
       return presetStyles[key];
