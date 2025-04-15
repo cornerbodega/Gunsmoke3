@@ -467,7 +467,10 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
 
       const speakerName = match[1].trim();
       const spokenText = match[2].trim();
-
+      if (!spokenText) {
+        console.warn(`⚠️ Line ${i + 1} is empty after speaker extraction`);
+        continue;
+      }
       const lineObj = {
         character_id: metadata.character_id,
         text: spokenText, // ✅ Just the actual line
@@ -1037,6 +1040,7 @@ async function generateAudioAndVisemes(sceneId) {
       "info",
       "script-creation-logs"
     );
+
     for (const row of rows) {
       const { line_id, line_obj } = row;
       const { text, character_id } = line_obj;
@@ -1534,6 +1538,7 @@ app.get("/audio-proxy", async (req, res) => {
     await pump();
   } catch (err) {
     console.error("Proxy error:", err);
+    console.log(`url: ${url}`);
     res.status(500).send("Proxy failed");
   }
 });
@@ -1541,7 +1546,13 @@ app.post("/convert", upload.single("video"), (req, res) => {
   const sceneId = req.body.sceneId;
   const sessionId = req.body.sessionId;
   const line_id = req.body.line_id || `0`;
-  const folderName = `${sessionId}-${sceneId}`;
+  let folderName = "";
+  if (!req.body.folderName) {
+    folderName = `${sessionId}-${sceneId}`;
+  } else {
+    folderName = `${req.body.folderName}-${sceneId}`;
+  }
+
   const folderPath = path.join(__dirname, "videos", folderName);
 
   if (!req.file) {

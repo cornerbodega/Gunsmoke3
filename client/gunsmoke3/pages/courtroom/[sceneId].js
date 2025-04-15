@@ -6,6 +6,7 @@ import { getSupabase } from "@/utils/supabase";
 export async function getServerSideProps(context) {
   const supabase = getSupabase();
   const { sceneId } = context.params;
+  const { folderName, start, end } = context.query;
   const pageSize = 1000;
 
   async function fetchLinesRecursively(from = 0, accumulatedLines = []) {
@@ -47,7 +48,7 @@ export async function getServerSideProps(context) {
       eye_target: "witness",
       zone: "judge_sitting_at_judge_bench",
       text: "Please rise for the honorable judge entering the courtroom.",
-      audio_url: "/audio/intro.mp3", // swap with your actual audio
+      audio_url: "/intro_music.mp3", // swap with your actual audio
       pause_before: 0.5,
       emotion: "neutral",
       camera: "wide_establishing",
@@ -63,12 +64,39 @@ export async function getServerSideProps(context) {
     props: {
       lines: [introLine, ...lines],
       sceneId,
+      folderName: folderName || "bloodhound",
+      startFromLineId: parseInt(start) || 0,
+      endLineId: parseInt(end) || 0,
+      skipIntro: parseInt(start) > 0, // skip intro is true only if start is not greater than 0
     },
   };
 }
 
-export default function ScenePage({ lines, sceneId }) {
+export default function ScenePage({
+  lines,
+  sceneId,
+  folderName,
+  startFromLineId,
+  endLineId,
+  skipIntro,
+}) {
+  // folderName,
+  // startFromLineId,
+  // endLineId,
+  // skipIntro,
+  console.log(`folderName: ${folderName}`);
+  console.log(`startFromLineId: ${startFromLineId}`);
+  console.log(`endLineId: ${endLineId}`);
+  console.log(`skipIntro: ${skipIntro}`);
+
   return (
-    <CourtroomScene lines={lines} sceneId={sceneId} startFromLineId={-1} />
+    <CourtroomScene
+      lines={lines}
+      sceneId={sceneId}
+      startFromLineId={startFromLineId}
+      endLineId={endLineId}
+      skipIntro={skipIntro}
+      folderName={folderName}
+    />
   );
 }
