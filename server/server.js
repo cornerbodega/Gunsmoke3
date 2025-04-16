@@ -136,6 +136,8 @@ const phonemeToViseme = {
 };
 
 const MAX_CHUNKS = 518;
+// const MAX_CHUNKS = 3;
+
 const textChunkSize = 7000;
 
 function splitBySpeakerAndLength(text, maxChars = 7000) {
@@ -343,8 +345,7 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
 
     // 🧠 Process chunks
     const processedChunks = [];
-    let lastSpeaker = null;
-    let lastLine = null;
+    const lineHistory = [];
 
     for (let i = 0; i < limit; i++) {
       console.log(`🧼 Cleaning chunk ${i + 1} of ${chunks.length}`);
@@ -358,22 +359,25 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
       const cleanedText = await processChunk(
         chunks[i],
         speakerMap,
-        lastSpeaker,
-        lastLine
+        lineHistory
       );
+
+      const CONTEXT_WINDOW = 10;
 
       processedChunks.push({
         chunkIndex: i,
         originalText: chunks[i],
         cleanedText,
       });
-
       const lines = cleanedText.split("\n").filter(Boolean);
-      const lastDialogLine = lines[lines.length - 1];
-      const match = lastDialogLine.match(/^(.+?):\s*(.+)$/);
-      if (match) {
-        lastSpeaker = match[1];
-        lastLine = match[2];
+      for (const line of lines.slice(-CONTEXT_WINDOW)) {
+        const match = line.match(/^(.+?):\s*(.+)$/);
+        if (match) {
+          lineHistory.push({ speaker: match[1], text: match[2] });
+          if (lineHistory.length > CONTEXT_WINDOW) {
+            lineHistory.shift();
+          }
+        }
       }
     }
 
@@ -388,7 +392,6 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
       "success",
       "script-creation-logs"
     );
-    const CONTEXT_WINDOW = 10;
     const rawLines = finalTranscript.split("\n").filter(Boolean);
 
     const stringSimilarity = require("string-similarity");
@@ -433,6 +436,7 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
     //   lines,
     // });
     let previousLines = [];
+    const CONTEXT_WINDOW = 15;
 
     for await (const [i, line] of lines.entries()) {
       const contextLines = [...previousLines]; // prevent mutation bleed
@@ -552,11 +556,11 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
       }
 
       const prompt = `
-      You're helping animate courtroom scenes. Given a character's current line of dialog and the full metadata of the previous line, return updated metadata for the current line in the following JSON format using the exact value options if specified. Do not create new values or change the numbers. Witnesses are not usually the ones asking questions. Lawyer roles can be shared across characters.
+      You're helping animate courtroom scenes. Given a character's current line of dialog and the full metadata of the previous line, return updated metadata for the current line in the following JSON format using the exact value options if specified. Do not create new values or change the numbers. Witnesses are not usually the ones asking questions. 
       
       {
         "text": "Return the speech of the character ",
-        "character_id": "The character_id of the character speaking the line. Make your best guess from the list.  Witnesses are not usually the ones asking questions. If a witness is asking a question it's likely a mistake unless it makes sense in context. If it's a mistake, assign them to the correct character_id and role.",
+        "character_id": "The character_id of the character speaking the line. Make your best guess from the list and t.  Witnesses are not usually the ones asking questions. If a witness is asking a question it's likely a mistake unless it makes sense in context. If it's a mistake, assign them to the correct character_id and role.",
         "role": "witness" or "prosecutor1" or "prosecutor2" or "defense1", // do a sanity check that this role would say this line
         "posture": "sitting" or "standing",
         "emotion": "neutral" or "tense" or "confident" or "nervous" or "defensive",
@@ -1129,7 +1133,7 @@ async function extractCharactersFromChunk(chunkText, speakerMap) {
     
     [
       {
-        "name": "Samuel Bankman-Fried",
+        "name": "Mr. Bankman-Fried",
         "speaker_label": "A",
         "role": "witness",
         "id": "samuelbankmanfried"
@@ -1191,16 +1195,21 @@ async function extractCharactersFromChunk(chunkText, speakerMap) {
   }
 }
 
-async function processChunk(chunkText, speakerMap, lastSpeaker, lastLine) {
-  return await cleanText(chunkText, speakerMap, lastSpeaker, lastLine);
+async function processChunk(chunkText, speakerMap, previousLines) {
+  return await cleanText(chunkText, speakerMap, previousLines);
 }
 
-async function cleanText(chunkText, speakerMap, lastSpeaker, lastLine) {
+async function cleanText(chunkText, speakerMap, previousLines) {
+  const CONTEXT_WINDOW = 15; // Number of lines to keep in context
   try {
     let contextPrompt = `You are cleaning and reformatting dialog from a legal transcript. Based on the prior speaker and last spoken line, continue appropriately.\n\n`;
 
-    if (lastSpeaker && lastLine) {
-      contextPrompt += `Previous speaker: ${lastSpeaker}\nPrevious line: "${lastLine}"\n\n`;
+    if (previousLines.length) {
+      const priorContext = previousLines
+        .slice(-CONTEXT_WINDOW)
+        .map((line) => `${line.speaker}: ${line.text}`)
+        .join("\n");
+      contextPrompt += `Prior dialog for context:\n${priorContext}\n\n`;
     }
 
     contextPrompt += `Identify speakers using this list: ${JSON.stringify(
@@ -1210,9 +1219,9 @@ async function cleanText(chunkText, speakerMap, lastSpeaker, lastLine) {
     )}. Return dialog only, in the format "Speaker Name: line". Do not explain or summarize. Omit narration or non-dialog text. 
       
       ⚠️ If the transcript includes any redaction codes (such as (b)(6), (b)(7)(C), or similar), replace them with "Redacted". Ensure redacted portions are cleanly replaced and do not break sentence structure.
-
-      Remove any label of Q or A. Replace with character names from the list. Important: use context and judgement to determine the correct speaker. For example, make sure a witness is not questioning themselves. Also, make sure the prosecutor and defense is taking turns asking a series of questions, just like in a real trial.
-      If a witness is asking a question, it's likely a mistake unless it makes sense in context. 
+      Remove any descriptions like  DIRECT EXAMINATION (cont’d) BY Mr. Cohen, but use that to identify the speaker if possible or necessary.
+      Remove any label of Q or A. Replace with character names from the list. Important: use context and judgement to determine the correct speaker. For example, make sure a witness is not questioning themselves. Also, keep the witness and questioner consistent until the script mentions a change, just like in a real trial.
+      If a witness is asking a question, it's likely a mistake unless it makes sense in context. Long speech should be split into multiple lines, make a new line where eye contact would change.
       `;
 
     // const sampleInput = `version, how many tests could it run 18 at that time in 2010? 19 A I don't know exactly what the number was...`;

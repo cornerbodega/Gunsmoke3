@@ -352,7 +352,7 @@ export default function CourtroomScene({
         formData.append("sceneId", sceneId);
         formData.append("folderName", folderName);
         try {
-          await fetch("http://localhost:3001/convert", {
+          fetch("http://localhost:3001/convert", {
             method: "POST",
             body: formData,
           });
@@ -726,7 +726,7 @@ export default function CourtroomScene({
       position: [-7.5, -0.05, -8.5],
       rotation: [0, Math.PI / 1.2, 0],
     },
-    clerk_box: { position: [10, 1, -15], rotation: [0, Math.PI, 0] },
+    clerk_box: { position: [10, 1, -15], rotation: [0, 0, 0] },
   };
 
   const getLocationPose = (key) =>
@@ -1082,7 +1082,6 @@ export default function CourtroomScene({
                     }
                   );
                 })()}
-
                 {/* Judge (always at bench) */}
                 {/* <Character
                   key="judge"
@@ -1101,9 +1100,8 @@ export default function CourtroomScene({
                     emotion: "angry",
                   }}
                 /> */}
-
                 {/* Clerk (always in clerk_box) */}
-                <Character
+                {/* <Character
                   key="clerk"
                   {...getLocationPose("clerk_box")}
                   onReady={(headRef) =>
@@ -1119,9 +1117,8 @@ export default function CourtroomScene({
                     activeSpeakerId,
                     emotion: "neutral",
                   }}
-                />
-
-                {/* Stenographer (always in stenographer_station) */}
+                /> */}
+                .{/* Stenographer (always in stenographer_station) */}
                 <Character
                   key="stenographer"
                   {...getLocationPose("stenographer_station")}
@@ -1139,7 +1136,6 @@ export default function CourtroomScene({
                     emotion: "neutral",
                   }}
                 />
-
                 {/* Jury (6 members fixed position) */}
                 {[...Array(6)].map((_, i) => (
                   <Character
@@ -1362,7 +1358,7 @@ function JudgeIntroAnimation({
           formData.append("folderName", folderName);
 
           try {
-            await fetch("http://localhost:3001/convert", {
+            fetch("http://localhost:3001/convert", {
               method: "POST",
               body: formData,
             });
