@@ -64,7 +64,7 @@ export async function getServerSideProps(context) {
     props: {
       lines: [introLine, ...lines],
       sceneId,
-      folderName: folderName || "bloodhound",
+      folderName: folderName || "alameda",
       startFromLineId: parseInt(start) || 0,
       endLineId: parseInt(end) || 0,
       skipIntro: parseInt(start) > 0, // skip intro is true only if start is not greater than 0

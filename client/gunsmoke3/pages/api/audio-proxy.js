@@ -4,7 +4,9 @@ export default async function handler(req, res) {
   const { url } = req.query;
   if (!url) return res.status(400).send("Missing URL");
 
-  const nodeProxyUrl = `http://localhost:3001/audio-proxy?url=${encodeURIComponent(url)}`;
+  const nodeProxyUrl = `http://localhost:3001/audio-proxy?url=${encodeURIComponent(
+    url
+  )}`;
 
   const fetchWithRetry = async (url, options, retries = 3) => {
     for (let i = 0; i <= retries; i++) {
@@ -25,10 +27,13 @@ export default async function handler(req, res) {
   try {
     const response = await fetchWithRetry(nodeProxyUrl, {
       responseType: "stream",
-      timeout: 10000,
+      timeout: 120000,
     });
 
-    res.setHeader("Content-Type", response.headers["content-type"] || "audio/mpeg");
+    res.setHeader(
+      "Content-Type",
+      response.headers["content-type"] || "audio/mpeg"
+    );
     if (response.headers["content-length"]) {
       res.setHeader("Content-Length", response.headers["content-length"]);
     }

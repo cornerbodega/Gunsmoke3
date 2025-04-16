@@ -1,9 +1,9 @@
 const puppeteer = require("puppeteer");
 
 // === CONFIGURATION ===
-const baseSceneId = "4982a248-4a32-4f29-ac94-73a2d2af790c";
-const totalLines = 3148; // Total lines in the scene
-const startFromLineId = 407; // Where to begin (inclusive)
+const baseSceneId = "160eeb60-0e31-42a4-9f27-6fe2f16dbed3";
+const totalLines = 4794; // Total lines in the scene
+const startFromLineId = 0; // Where to begin (inclusive)
 const endLineId = null; // Where to stop (inclusive), null = end at last
 
 const c = 2; // Number of concurrent browser instances per wave

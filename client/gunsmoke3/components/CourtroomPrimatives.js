@@ -148,10 +148,55 @@ export const JudgeBackWall = ({
         args={[wallWidth, 0.5, 0.1]}
         color="#2e1a0e"
       />
-      <mesh position={[0, 8, 0.4]}>
-        <planeGeometry args={[12, 8]} />
-        <meshStandardMaterial map={paintingTexture} />
-      </mesh>
+      <group position={[0, 2, 0]}>
+        {" "}
+        {/* move everything up by 2 units */}
+        {/* Painting */}
+        <mesh position={[0, 8, 0.4]}>
+          <planeGeometry args={[13, 9]} />
+          <meshStandardMaterial map={paintingTexture} />
+        </mesh>
+        {/* Picture Frame */}
+        <group position={[0, 8, 0.425]}>
+          {/* Top and Bottom Frame */}
+          <Box position={[0, 4.6, 0]} args={[13, 0.5, 0.1]} color="#2e1a0e" />
+          <Box position={[0, -4.6, 0]} args={[13, 0.5, 0.1]} color="#2e1a0e" />
+
+          {/* Left and Right Frame */}
+          <Box
+            position={[-6.75, 0, 0]}
+            args={[0.5, 8.75, 0.1]}
+            color="#2e1a0e"
+          />
+          <Box
+            position={[6.75, 0, 0]}
+            args={[0.5, 8.75, 0.1]}
+            color="#2e1a0e"
+          />
+
+          {/* Decorative corner squares (enhanced) */}
+          <Box
+            position={[-6.75, 4.6, 0.06]}
+            args={[0.7, 0.7, 0.06]}
+            color="#3c1f0f"
+          />
+          <Box
+            position={[6.75, 4.6, 0.06]}
+            args={[0.7, 0.7, 0.06]}
+            color="#3c1f0f"
+          />
+          <Box
+            position={[-6.75, -4.6, 0.06]}
+            args={[0.7, 0.7, 0.06]}
+            color="#3c1f0f"
+          />
+          <Box
+            position={[6.75, -4.6, 0.06]}
+            args={[0.7, 0.7, 0.06]}
+            color="#3c1f0f"
+          />
+        </group>
+      </group>
     </group>
   );
 };
