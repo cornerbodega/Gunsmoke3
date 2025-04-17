@@ -27,7 +27,7 @@ export default async function handler(req, res) {
     res.setHeader("Content-Type", "text/plain");
     res.send(txt);
   } catch (err) {
-    console.error("Proxy error:", err);
+    console.error("Create Chapters Proxy error:", err);
     res.status(500).json({ error: "Proxy request failed" });
   }
 }

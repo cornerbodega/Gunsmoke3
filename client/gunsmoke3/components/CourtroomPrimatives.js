@@ -148,7 +148,7 @@ export const JudgeBackWall = ({
         args={[wallWidth, 0.5, 0.1]}
         color="#2e1a0e"
       />
-      <group position={[0, 2, 0]}>
+      <group position={[0, 0, 0]}>
         {" "}
         {/* move everything up by 2 units */}
         {/* Painting */}

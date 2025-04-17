@@ -1,3 +1,4 @@
+// server.js
 require("dotenv").config();
 const { createClient } = require("@supabase/supabase-js");
 const saveToSupabase = require("./utils/saveToSupabase");
@@ -1503,6 +1504,41 @@ Character ID: ${character_id}
   }
 }
 
+async function fetchWithRetry(url, options = {}, retries = 5) {
+  for (let i = 0; i <= retries; i++) {
+    try {
+      const res = await fetch(url, options);
+      if (!res.ok) throw new Error(`Upstream returned ${res.status}`);
+      return res;
+    } catch (err) {
+      if (i === retries) throw err;
+      const delay = Math.pow(2, i) * 100;
+      console.warn(
+        `🔁 Retry ${i + 1}/${retries} after ${delay}ms due to:`,
+        err.message
+      );
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+}
+async function fetchWithRetry(url, options = {}, retries = 5) {
+  for (let i = 0; i <= retries; i++) {
+    try {
+      const res = await fetch(url, options);
+      if (!res.ok) throw new Error(`Upstream returned ${res.status}`);
+      return res;
+    } catch (err) {
+      if (i === retries) throw err;
+      const delay = Math.pow(2, i) * 100;
+      console.warn(
+        `🔁 Retry ${i + 1}/${retries} after ${delay}ms due to:`,
+        err.message
+      );
+      await new Promise((r) => setTimeout(r, delay));
+    }
+  }
+}
+
 app.get("/audio-proxy", async (req, res) => {
   const { url } = req.query;
   if (!url) return res.status(400).send("Missing URL");
@@ -1517,7 +1553,7 @@ app.get("/audio-proxy", async (req, res) => {
       return res.status(403).send("Forbidden: Invalid host");
     }
 
-    const response = await fetch(decodedUrl);
+    const response = await fetchWithRetry(decodedUrl, {}, 5);
 
     if (!response.ok) {
       return res.status(response.status).send("Upstream fetch failed");
@@ -1546,7 +1582,7 @@ app.get("/audio-proxy", async (req, res) => {
 
     await pump();
   } catch (err) {
-    console.error("Proxy error:", err);
+    console.error("Audio Proxy error:", err);
     console.log(`url: ${url}`);
     res.status(500).send("Proxy failed");
   }
@@ -1723,9 +1759,9 @@ app.post("/create-chapters", async (req, res) => {
   if (!rows.length) {
     return res.status(404).json({ error: "No lines found for this scene." });
   }
-  const totalDuration = 11.5 * 60 * 60; // // 11.5 hours
+  const totalDuration = 8 * 60 * 60; // // 8 hours
   const chapters = [];
-  const chapterDuration = 30 * 60; // 30 minutes
+  const chapterDuration = 15 * 60; // 30 minutes
   const numChapters = Math.ceil(totalDuration / chapterDuration);
   const linesPerChapter = Math.ceil(rows.length / numChapters);
   console.log(

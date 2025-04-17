@@ -1,37 +1,95 @@
 const puppeteer = require("puppeteer");
+const fs = require("fs");
+const path = require("path");
+const { createClient } = require("@supabase/supabase-js");
+require("dotenv").config({ path: path.resolve(__dirname, "../.env") });
 
 // === CONFIGURATION ===
 const baseSceneId = "160eeb60-0e31-42a4-9f27-6fe2f16dbed3";
-const totalLines = 4794; // Total lines in the scene
-const startFromLineId = 0; // Where to begin (inclusive)
-const endLineId = null; // Where to stop (inclusive), null = end at last
+const folderName = "alameda";
+const outputDir = path.resolve(
+  __dirname,
+  `../videos/${folderName}-${baseSceneId}`
+);
 
-const c = 2; // Number of concurrent browser instances per wave
-const headless = true; // Set to false for debugging
-const delayBetweenWavesMs = 500; // Delay between waves (ms)
-const targetLogMessage = "<<Close Virtual Browser>>"; // Message to wait for before closing browser
+const c = 1;
+const headless = true;
+const delayBetweenWavesMs = 500;
+const targetLogMessage = "<<Close Virtual Browser>>";
 
-// === CALCULATED VALUES ===
-const start = startFromLineId ?? 0;
-const end = endLineId ?? totalLines - 1;
-const r = Math.ceil((end - start + 1) / c); // Dynamic chunk size based on concurrency
+// === Supabase Setup ===
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+);
 
 // === HELPERS ===
-
-// Split a start-end range into chunks of size `chunkSize`
-function chunkRanges(start, end, chunkSize) {
-  const chunks = [];
-  for (let i = start; i <= end; i += chunkSize) {
-    chunks.push([i, Math.min(i + chunkSize - 1, end)]);
-  }
-  return chunks;
+function getExistingLineNumbers() {
+  if (!fs.existsSync(outputDir)) return new Set();
+  return new Set(
+    fs
+      .readdirSync(outputDir)
+      .map((f) => parseInt(f))
+      .filter((n) => !isNaN(n))
+  );
 }
 
-// Launch a browser to record a given line range
-async function runScene(start, end) {
+async function fetchValidLineIds(sceneId) {
+  const pageSize = 1000;
+  let from = 0;
+  let all = [];
+
+  while (true) {
+    const { data, error } = await supabase
+      .from("gs3_lines")
+      .select("line_id")
+      .eq("scene_id", sceneId)
+      .order("line_id", { ascending: true })
+      .range(from, from + pageSize - 1);
+
+    if (error) throw new Error(error.message);
+    if (!data || data.length === 0) break;
+
+    all.push(...data.map((d) => d.line_id));
+    if (data.length < pageSize) break;
+    from += pageSize;
+  }
+
+  return new Set([0, ...all]); // Always include intro line 0
+}
+
+function groupConsecutiveRanges(lineIds) {
+  if (lineIds.length === 0) return [];
+  lineIds.sort((a, b) => a - b);
+  const ranges = [];
+  let start = lineIds[0];
+  let end = lineIds[0];
+
+  for (let i = 1; i < lineIds.length; i++) {
+    if (lineIds[i] === end + 1) {
+      end = lineIds[i];
+    } else {
+      ranges.push([start, end]);
+      start = end = lineIds[i];
+    }
+  }
+
+  ranges.push([start, end]);
+  return ranges;
+}
+
+async function runScene(
+  start,
+  end,
+  index,
+  totalChunks,
+  totalLinesMissing,
+  linesRenderedSoFar
+) {
+  const lineCount = end - start + 1;
+  const url = `http://localhost:3000/courtroom/${baseSceneId}?start=${start}&end=${end}&folderName=${folderName}`;
   const browser = await puppeteer.launch({ headless, defaultViewport: null });
   const page = await browser.newPage();
-  const url = `http://localhost:3000/courtroom/${baseSceneId}?start=${start}&end=${end}`;
   console.log(`🎥 Visiting: ${url}`);
 
   const waitForLog = new Promise((resolve) => {
@@ -44,7 +102,6 @@ async function runScene(start, end) {
     });
   });
 
-  // Open the page and simulate interaction to trigger playback
   await page.goto(url, { waitUntil: "networkidle2", timeout: 120_000 });
 
   const { width, height } = await page.evaluate(() => ({
@@ -52,43 +109,78 @@ async function runScene(start, end) {
     height: window.innerHeight,
   }));
 
-  await page.mouse.click(width / 2, height / 2); // Required to unlock audio
-  await page.keyboard.press("Enter"); // Starts playback
+  await page.mouse.click(width / 2, height / 2);
+  await page.keyboard.press("Enter");
 
   await waitForLog;
-  console.log(`✅ Finished range ${start}-${end}`);
+
+  const totalPercent = (
+    ((linesRenderedSoFar + lineCount) / totalLinesMissing) *
+    100
+  ).toFixed(2);
+  const batchPercent = (((index + 1) / totalChunks) * 100).toFixed(2);
+
+  console.log(
+    `✅ Finished ${start}-${end} (${lineCount} lines) | ${totalPercent}% total, ${batchPercent}% of current batch`
+  );
+
   await browser.close();
 }
 
-// === MAIN EXECUTION ===
+// === MAIN ===
 (async () => {
-  const allChunks = chunkRanges(start, end, r);
-  const totalChunks = allChunks.length;
-  const batchSize = c;
+  console.log("📦 Fetching valid lines from Supabase...");
+  const validLines = await fetchValidLineIds(baseSceneId);
+  const renderedLines = getExistingLineNumbers();
+
+  const missingLines = [...validLines].filter((id) => !renderedLines.has(id));
+  if (missingLines.length === 0) {
+    console.log("🎉 All line outputs exist. Nothing to do!");
+    return;
+  }
+
+  const missingRanges = groupConsecutiveRanges(missingLines);
+  const totalChunks = missingRanges.length;
+
+  const totalLinesMissing = missingRanges.reduce(
+    (sum, [start, end]) => sum + (end - start + 1),
+    0
+  );
+  let linesRenderedSoFar = 0;
+
+  console.log(`📁 Output: ${outputDir}`);
+  console.log(`❌ Missing ranges: ${totalChunks}`);
+  console.log(`📉 Total missing lines: ${totalLinesMissing}`);
+  console.log(`🚀 Concurrency: ${c}`);
+  console.log("===================================");
+
   let batchIndex = 0;
-
-  // Preflight logs
-  console.log(`📦 Total lines: ${end - start + 1}`);
-  console.log(`🚀 Launching with concurrency: ${c}`);
-  console.log(`📊 Chunk size (r): ${r}`);
-  console.log(`🧩 Total chunks: ${totalChunks}`);
-
-  // Loop over each batch of concurrent runs
   while (batchIndex < totalChunks) {
-    const currentBatch = allChunks.slice(batchIndex, batchIndex + batchSize);
-    console.log(`🔁 Starting batch ${Math.floor(batchIndex / batchSize) + 1}`);
+    const currentBatch = missingRanges.slice(batchIndex, batchIndex + c);
+    const batchNumber = Math.floor(batchIndex / c) + 1;
+    const totalBatches = Math.ceil(totalChunks / c);
+
+    console.log(`🔁 Starting batch ${batchNumber} of ${totalBatches}`);
 
     await Promise.all(
-      currentBatch.map(async ([start, end]) => {
+      currentBatch.map(async ([start, end], i) => {
         try {
-          await runScene(start, end);
+          await runScene(
+            start,
+            end,
+            batchIndex + i,
+            totalChunks,
+            totalLinesMissing,
+            linesRenderedSoFar
+          );
+          linesRenderedSoFar += end - start + 1;
         } catch (err) {
           console.error(`❌ Failed range ${start}-${end}:`, err);
         }
       })
     );
 
-    batchIndex += batchSize;
+    batchIndex += c;
 
     if (batchIndex < totalChunks) {
       console.log(`⏳ Waiting ${delayBetweenWavesMs}ms before next batch...`);
@@ -96,5 +188,5 @@ async function runScene(start, end) {
     }
   }
 
-  console.log("🏁 All scenes completed.");
+  console.log("🏁 All missing scenes rendered.");
 })();
