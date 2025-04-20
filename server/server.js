@@ -136,8 +136,8 @@ const phonemeToViseme = {
   sil: "rest",
 };
 
-const MAX_CHUNKS = 518;
-// const MAX_CHUNKS = 3;
+// const MAX_CHUNKS = 518;
+const MAX_CHUNKS = 44;
 
 const textChunkSize = 7000;
 
@@ -215,14 +215,13 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
       `📥 Received PDF upload...`,
       "info",
       "script-creation-logs"
-    ); // Slack message
+    );
 
-    const sceneId = crypto.randomUUID(); // or whatever UUID you generate
+    const sceneId = crypto.randomUUID();
     const filePath = req.file.path;
     const dataBuffer = fs.readFileSync(filePath);
     const parsed = await pdfParse(dataBuffer);
     const docMetadata = await analyzeRawDocument(parsed.text);
-    console.log("🧠 Document Analysis Result:", docMetadata);
 
     fs.unlinkSync(filePath);
     console.log("📄 PDF parsed successfully");
@@ -230,21 +229,15 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
       `📥 PDF Parsed Successfully.`,
       "success",
       "script-creation-logs"
-    ); // Slack message
+    );
+    console.log(`parsed.text:`, parsed.text);
+
     const chunks = splitBySpeakerAndLength(parsed.text, textChunkSize);
     const limit = Math.min(MAX_CHUNKS, chunks.length);
     console.log(`🔢 Processing ${limit} of ${chunks.length} chunks`);
 
-    // 🔍 Extract characters
-    console.log("🔍 Extracting character list...");
-    sendSlackMessage(
-      `🔍 Extracting character list...`,
-      "info",
-      "script-creation-logs"
-    ); // Slack message
-    // 🔍 Unified speaker map
-    const speakerMap = new Map(); // id => { name, role, label, voice }
-
+    // 🔍 Character detection
+    const speakerMap = new Map();
     for (let i = 0; i < limit; i++) {
       const detected = await extractCharactersFromChunk(chunks[i], speakerMap);
       for (const char of detected) {
@@ -257,96 +250,31 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
         }
       }
     }
+
     speakerMap.set("clerk", {
       name: "Clerk",
       speaker_label: "Clerk",
       role: "clerk",
       voice: "en-US-Wavenet-C",
     });
-    // Step here to clean speakerMap
+    speakerMap.set("audience", {
+      name: "Audience",
+      speaker_label: "Audience",
+      role: "audience",
+      voice: "en-US-Wavenet-C",
+    });
+
     console.log("👥 Final Speaker Map:", Object.fromEntries(speakerMap));
     sendSlackMessage(
       `👥 Final Speaker Map: ${JSON.stringify(Object.fromEntries(speakerMap))}`,
       "info",
       "script-creation-logs"
-    ); // Slack message
-    // Log the start of the character cleaning process
-    console.log("[INFO] Starting character cleaning process...");
-    sendSlackMessage(
-      `[INFO] Starting character cleaning process...`,
-      "info",
-      "script-creation-logs"
-    ); // Slack message
-    // Call OpenAI to clean up the speakerMap and get unique characters
-    console.log("[INFO] Sending speaker map to OpenAI for cleaning...");
-    const charactersResponse = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        {
-          role: "system",
-          content: `You are an expert in courtroom transcripts. Given a list of characters, clean up the list by removing duplicates and ensuring consistent naming conventions. Each character should have a unique ID, and their roles should be clearly defined. Return the same JSON format. Remove any Unknowns. Do not explain your answer.`,
-        },
-        {
-          role: "user",
-          content: JSON.stringify(Array.from(speakerMap.values())),
-        },
-      ],
-    });
-
-    // Log the raw response received from OpenAI
-    const rawCharacters = charactersResponse.choices[0].message.content;
-    console.log("[DEBUG] Raw characters response from OpenAI:", rawCharacters);
-
-    // Remove markdown formatting from the response
-    const cleanedCharacters = rawCharacters
-      .trim()
-      .replace(/^```(?:json)?\s*/i, "")
-      .replace(/```$/, "")
-      .trim();
-    console.log("[DEBUG] Cleaned characters JSON string:", cleanedCharacters);
-
-    // Parse the cleaned JSON into an object
-    let parsedCharacters;
-    try {
-      parsedCharacters = JSON.parse(cleanedCharacters);
-      console.log("[INFO] Successfully parsed cleaned characters.");
-      sendSlackMessage(
-        `[INFO] Successfully parsed cleaned characters.`,
-        "info",
-        "script-creation-logs"
-      );
-    } catch (parseError) {
-      console.error(
-        "[ERROR] Failed to parse cleaned characters JSON:",
-        parseError
-      );
-      sendSlackMessage(
-        `[ERROR] Failed to parse cleaned characters JSON:`,
-        "error",
-        "script-creation-logs"
-      );
-      throw parseError;
-    }
-
-    // Clear and update the speakerMap with cleaned characters using the unique "id"
-    speakerMap.clear();
-    for (const char of parsedCharacters) {
-      speakerMap.set(char.id, {
-        name: char.name,
-        speaker_label: char.speaker_label,
-        role: char.role,
-      });
-    }
-    // await assignVoicesForAllSpeakers(speakerMap, openai);
-
-    console.log(
-      "[INFO] Updated speaker map with cleaned characters:",
-      Object.fromEntries(speakerMap)
     );
 
-    // 🧠 Process chunks
-    const processedChunks = [];
+    // 🧼 Process chunks into structured lines
+    const allLines = [];
     const lineHistory = [];
+    let lineCounter = 1;
 
     for (let i = 0; i < limit; i++) {
       console.log(`🧼 Cleaning chunk ${i + 1} of ${chunks.length}`);
@@ -357,310 +285,45 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
         "info",
         "script-creation-logs"
       );
-      const cleanedText = await processChunk(
+
+      const structuredLines = await processChunk(
         chunks[i],
         speakerMap,
         lineHistory
       );
 
-      const CONTEXT_WINDOW = 10;
+      for (const lineObj of structuredLines) {
+        // Assign voice
+        lineObj.voice = assignVoiceForSpeaker(lineObj.character_id);
 
-      processedChunks.push({
-        chunkIndex: i,
-        originalText: chunks[i],
-        cleanedText,
-      });
-      const lines = cleanedText.split("\n").filter(Boolean);
-      for (const line of lines.slice(-CONTEXT_WINDOW)) {
-        const match = line.match(/^(.+?):\s*(.+)$/);
-        if (match) {
-          lineHistory.push({ speaker: match[1], text: match[2] });
-          if (lineHistory.length > CONTEXT_WINDOW) {
-            lineHistory.shift();
-          }
-        }
-      }
-    }
+        allLines.push({ line_id: lineCounter, line_obj: lineObj });
 
-    // 🧵 AI-powered de-overlap
-    const finalTranscript = await iterativeMergeChunks(
-      processedChunks.map((c) => c.cleanedText),
-      1000
-    );
-    console.log("🧵 Final transcript assembled");
-    sendSlackMessage(
-      `🧵 Final transcript assembled`,
-      "success",
-      "script-creation-logs"
-    );
-    const rawLines = finalTranscript.split("\n").filter(Boolean);
+        // Update line history (for context continuity)
+        lineHistory.push({
+          speaker:
+            speakerMap.get(lineObj.character_id)?.name || lineObj.character_id,
+          text: lineObj.text,
+        });
+        if (lineHistory.length > 15) lineHistory.shift();
 
-    const stringSimilarity = require("string-similarity");
-
-    function extractSpeakerAndText(line) {
-      const separatorIndex = line.indexOf(":");
-      if (separatorIndex === -1) return { speaker: "", text: line.trim() };
-      return {
-        speaker: line.slice(0, separatorIndex).trim(),
-        text: line.slice(separatorIndex + 1).trim(),
-      };
-    }
-
-    function isDuplicateLine(prev, curr, threshold = 0.55) {
-      const { speaker: s1, text: t1 } = extractSpeakerAndText(prev);
-      const { speaker: s2, text: t2 } = extractSpeakerAndText(curr);
-
-      if (s1.toLowerCase() !== s2.toLowerCase()) return false;
-
-      const similarity = stringSimilarity.compareTwoStrings(t1, t2);
-      return similarity >= threshold;
-    }
-
-    // ✅ Deduplicate in-place
-    const lines = [];
-    for (let i = 0; i < rawLines.length; i++) {
-      if (i === 0 || !isDuplicateLine(rawLines[i - 1], rawLines[i])) {
-        lines.push(rawLines[i]);
-      } else {
-        console.log(`🗑️ Removed near-duplicate line ${i + 1}: ${rawLines[i]}`);
-      }
-    }
-    // return res.json({
-    //   message: "✅ Transcript processed",
-    //   chunkCount: chunks.length,
-    //   processedChunkCount: processedChunks.length,
-    //   numpages: parsed.numpages,
-    //   info: parsed.info,
-    //   characters: Array.from(speakerMap.values()),
-    //   transcript: finalTranscript,
-    //   cleanedChunks: processedChunks.map((c) => c.cleanedText),
-    //   lines,
-    // });
-    let previousLines = [];
-    const CONTEXT_WINDOW = 15;
-
-    for await (const [i, line] of lines.entries()) {
-      const contextLines = [...previousLines]; // prevent mutation bleed
-      console.log(
-        `Generating scene metadata for line ${i + 1}... of ${
-          lines.length
-        }: ${line}`
-      );
-      sendSlackMessage(
-        `Generating scene metadata for line ${i + 1}... of ${
-          lines.length
-        }: ${line}`,
-        "info",
-        "script-creation-logs"
-      );
-
-      const metadata = await generateMetadataForLine({
-        text: lines[i],
-        previousLines: contextLines,
-      });
-      if (!metadata) {
-        console.warn(`⚠️ No metadata generated for line ${i + 1}`);
-        continue;
-      }
-      // const line = lines[i];
-      const match = line.match(/^([^:]+):\s*(.*)$/); // split at first colon
-
-      if (!match) {
-        console.warn(`⚠️ Line ${i + 1} is not formatted as "Speaker: Text"`);
-        continue;
-      }
-
-      const speakerName = match[1].trim();
-      const spokenText = match[2].trim();
-      if (!spokenText) {
-        console.warn(`⚠️ Line ${i + 1} is empty after speaker extraction`);
-        continue;
-      }
-      const lineObj = {
-        character_id: metadata.character_id,
-        text: spokenText, // ✅ Just the actual line
-        posture: metadata.posture,
-        emotion: metadata.emotion,
-        zone: metadata.zone,
-        camera: metadata.camera,
-        eye_target: metadata.eye_target,
-        pause_before: metadata.pause_before,
-        audio_url: metadata.audio_url,
-        viseme_data: metadata.viseme_data,
-        role: metadata.role,
-      };
-
-      const lineData = {
-        scene_id: sceneId,
-        line_id: i + 1,
-        line_obj: lineObj,
-      };
-      if (metadata.text !== lines[i]) {
-        console.warn(`⚠️ GPT text mismatch on line ${i + 1}`);
-      }
-
-      await saveToSupabase("gs3_lines", lineData, {
-        onConflict: ["scene_id", "line_id"],
-      }).catch((error) =>
-        console.error(`❌ Error saving line ${i + 1}:`, error.message)
-      );
-      console.log(
-        `✅ Line ${i + 1} of ${lines.length} = ${(
-          (i / lines.length) *
-          100
-        ).toFixed(2)}% saved to Supabase`
-      );
-      sendSlackMessage(
-        `✅ Line ${i + 1} of ${lines.length} = ${(
-          (i / lines.length) *
-          100
-        ).toFixed(2)}% saved to Supabase`,
-        "info",
-        "script-creation-logs"
-      );
-      previousLines.push(lineObj);
-      if (previousLines.length > CONTEXT_WINDOW) previousLines.shift();
-    }
-
-    async function generateMetadataForLine({ text, previousLines }) {
-      const metadata = await generateSceneMetadata({
-        text,
-        previousLines, // Pass the entire sliding window for context
-      });
-      if (!metadata) {
-        console.warn(`⚠️ No metadata generated for line: ${text}`);
-        return {};
-      }
-
-      return {
-        ...metadata,
-      };
-    }
-
-    async function generateSceneMetadata({ text, previousLines }) {
-      let speakerLine = "";
-      let currentLineText = "";
-      console.log(`generateSceneMetadata text:`, text);
-
-      if (typeof text === "string" && text.includes(":")) {
-        const [rawSpeaker, ...lineParts] = text.split(":");
-        const estimatedSpeaker = rawSpeaker.trim();
-        const currentLine = lineParts.join(":").trim();
-
-        speakerLine = `Estimated speaker: "${estimatedSpeaker}"`;
-        currentLineText = `Current line: "${currentLine}"`;
-      } else {
-        console.warn(
-          `⚠️ Line "${text}" does not match expected format "Speaker: Text"`
-        );
-        return console.log("⚠️ No metadata generated");
-      }
-
-      const prompt = `
-      You're helping animate courtroom scenes. Given a character's current line of dialog and the full metadata of the previous line, return updated metadata for the current line in the following JSON format using the exact value options if specified. Do not create new values or change the numbers. Witnesses are not usually the ones asking questions. 
-      
-      {
-        "text": "Return the speech of the character ",
-        "character_id": "The character_id of the character speaking the line. Make your best guess from the list and t.  Witnesses are not usually the ones asking questions. If a witness is asking a question it's likely a mistake unless it makes sense in context. If it's a mistake, assign them to the correct character_id and role.",
-        "role": "witness" or "prosecutor1" or "prosecutor2" or "defense1", // do a sanity check that this role would say this line
-        "posture": "sitting" or "standing",
-        "emotion": "neutral" or "tense" or "confident" or "nervous" or "defensive",
-        "eye_target": "judge" or "witness" or "prosecutor1" or "prosecutor2"" or "defense1" or "jury",
-        "pause_before": "choose a number with respect to previous line for cinematic timing. 0.5 is a good default.",
-      }
-     
-      Use the prior metadata to keep scene continuity but adapt based on the new dialog.
-      
-      ${speakerLine}
-      ${currentLineText}
-
-     Previous Lines:
-    ${JSON.stringify(
-      previousLines.map((p) => ({
-        character_id: p.character_id,
-        text: p.text,
-        posture: p.posture,
-        emotion: p.emotion,
-      })),
-      null,
-      2
-    )}
-    Characters: ${JSON.stringify(
-      Array.from(speakerMap.values()).map((char) => ({
-        name: char.name,
-        character_id:
-          char.id || char.name.toLowerCase().replace(/[^a-z0-9]/g, ""),
-        role: char.role,
-      })),
-      null,
-      2
-    )}
-      `;
-      console.log("\n📤 Sending scene metadata prompt to OpenAI:\n", prompt);
-      console.log(`Sent at: ${new Date().toISOString()}`);
-
-      try {
-        const response = await openai.chat.completions.create({
-          model: "gpt-4o-mini",
-          messages: [{ role: "system", content: prompt }],
+        await saveToSupabase("gs3_lines", {
+          scene_id: sceneId,
+          line_id: lineCounter,
+          line_obj: lineObj,
         });
 
-        const content = response.choices[0].message.content.trim();
-        const jsonText = content
-          .replace(/^```(?:json)?\s*/i, "")
-          .replace(/```$/, "")
-          .trim();
-        console.log(
-          `Scene metadata OpenAI Response at: ${new Date().toISOString()}`
-        );
-
-        return JSON.parse(jsonText);
-      } catch (err) {
-        console.error(
-          "❌ Error generating scene metadata:",
-          err.message || err
-        );
-        return {};
+        lineCounter++;
       }
     }
 
-    console.log("✅ All lines saved. Starting audio generation...");
     sendSlackMessage(
       `✅ All lines saved. Starting audio generation...`,
       "success",
       "script-creation-logs"
     );
     await generateAudioAndVisemes(sceneId);
-    sendSlackMessage(
-      `🎙️ Audio and visemes generated`,
-      "success",
-      "script-creation-logs"
-    );
-
     await generateCharacterStyles(sceneId);
-    sendSlackMessage(
-      `🧑‍🎨 Character styles generated`,
-      "success",
-      "script-creation-logs"
-    );
-
     await assignZones(sceneId);
-    sendSlackMessage(`📦 Zones assigned`, "success", "script-creation-logs");
-
-    // // Build the knownCharacters array from speakerMap
-    // const knownCharacters = Array.from(speakerMap.values()).map((char) => ({
-    //   name: char.name,
-    //   character_id:
-    //     char.id || char.name.toLowerCase().replace(/[^a-z0-9]/g, ""),
-    // }));
-
-    // Call the batch assignment function
-    // await assignCharactersBatch(sceneId, knownCharacters);
-    // sendSlackMessage(
-    //   `🧠 Characters assigned`,
-    //   "success",
-    //   "script-creation-logs"
-    // );
 
     const sceneMetadata = {
       scene_id: sceneId,
@@ -676,9 +339,7 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
       },
     };
 
-    await saveToSupabase("gs3_scenes", sceneMetadata).catch((err) => {
-      console.error("❌ Failed to save scene metadata:", err.message);
-    });
+    await saveToSupabase("gs3_scenes", sceneMetadata);
     sendSlackMessage(
       `📄 Scene metadata saved for ${sceneId}`,
       "success",
@@ -688,13 +349,12 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
     res.json({
       message: "✅ Transcript processed",
       chunkCount: chunks.length,
-      processedChunkCount: processedChunks.length,
+      processedChunkCount: limit,
       numpages: parsed.numpages,
       info: parsed.info,
       characters: Array.from(speakerMap.values()),
-      transcript: finalTranscript,
-      cleanedChunks: processedChunks.map((c) => c.cleanedText),
-      lines,
+      // cleanedChunks: cleane      // transcript:
+      lines: allLines.map((l) => l.line_obj),
     });
   } catch (err) {
     console.error("❌ PDF parsing error:", err);
@@ -702,199 +362,107 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
   }
 });
 
-async function assignCharactersBatch(sceneId, knownCharacters, batchSize = 10) {
-  //   try {
-  //     // Fetch all lines for the scene using pagination
-  //     const rows = await getAllLinesForScene(sceneId);
-  //     for (let i = 0; i < rows.length; i += batchSize) {
-  //       const batch = rows.slice(i, i + batchSize);
-  //       // Construct a prompt with the batch of lines
-  //       const prompt = `
-  // You are analyzing a courtroom transcript and need to determine the correct character for each line of dialogue. You will receive a list of lines, each with a unique line ID and the text spoken by the character. Your task is to assign the correct character to each line based on the context of the dialogue. The existing character IDs are not necessarily correct, so you need to analyze the text and assign the correct character.
-  // Use the following list of known characters to select the appropriate character for each line.
-  // Each character is represented by a name and a normalized ID (lowercase with no spaces or punctuation).
-  // If the character says something meta like "this concludes... or "this resumes..." assign them to the judge.
-  // Known characters:
-  // ${JSON.stringify(knownCharacters, null, 2)}
-  // For each of the following transcript lines, return an array of JSON objects with the following keys:
-  // - "line_id": (number) the line's unique identifier,
-  // - "name": (string) the character's full name,
-  // - "character_id": (string) the normalized ID.
-  // - "role": (string) the character's role in the courtroom.
-  // ⚠️ Use context to infer the roles:
-  // - The **judge** is labeled "THE COURT".
-  // - The person labeled "A" is the **witness**.
-  // - The person labeled "Q" is the **lawyer examining the witness**. To determine if they are **prosecutor** or **defense**:
-  //    - If the lawyer is **calling or continuing with the witness**, especially if the witness is the defendant, they are likely the **defense**.
-  //    - If another lawyer says **"No objection"** after evidence is offered, they are usually the **opposing party**.
-  // - Consider who introduced the witness, offered exhibits, or made objections — this can help you identify roles more accurately.
-  // Transcript lines:
-  // ${batch
-  //   .map(
-  //     (row) =>
-  //       `Line ID ${row.line_id}: "${row.line_obj.text.replace(/"/g, '\\"')}"`
-  //   )
-  //   .join("\n")}
-  // Return only the JSON array.
-  //       `.trim();
-  //       // Request the LLM for the batch assignment
-  //       const response = await openai.chat.completions.create({
-  //         model: "gpt-4o-mini",
-  //         messages: [{ role: "system", content: prompt }],
-  //       });
-  //       let content = response.choices[0].message.content.trim();
-  //       content = content
-  //         .replace(/^```(?:json)?\s*/i, "")
-  //         .replace(/```$/, "")
-  //         .trim();
-  //       let assignments;
-  //       try {
-  //         assignments = JSON.parse(content);
-  //       } catch (parseErr) {
-  //         console.error(
-  //           "🚨 Error parsing batch assignment JSON:",
-  //           parseErr,
-  //           content
-  //         );
-  //         continue;
-  //       }
-  //       // Update each line with the assigned character from the batch response
-  //       // for (const assignment of assignments) {
-  //       //   const { line_id, name, character_id } = assignment;
-  //       //   // Find the matching line in the batch (for logging or additional logic)
-  //       //   const lineData = batch.find((r) => r.line_id === line_id);
-  //       //   if (!lineData) {
-  //       //     console.warn(`⚠️ No matching line found for line_id ${line_id}`);
-  //       //     continue;
-  //       //   }
-  //       //   const updatedLineObj = {
-  //       //     ...lineData.line_obj,
-  //       //     // assigned_character: { name, character_id },
-  //       //   };
-  //       //   const { error: updateErr } = await supabase
-  //       //     .from("gs3_lines")
-  //       //     .update({ line_obj: updatedLineObj })
-  //       //     .eq("scene_id", sceneId)
-  //       //     .eq("line_id", line_id);
-  //       //   if (updateErr) {
-  //       //     console.error(
-  //       //       `❌ Failed to update character for line ${line_id}:`,
-  //       //       updateErr.message
-  //       //     );
-  //       //   } else {
-  //       //     console.log(
-  //       //       `✅ Updated character for line ${line_id}: ${name} (${character_id})`
-  //       //     );
-  //       //     sendSlackMessage(
-  //       //       `✅ Updated character for line ${line_id}: ${name} (${character_id})`,
-  //       //       "success",
-  //       //       "script-creation-logs"
-  //       //     );
-  //       //   }
-  //       // }
-  //     }
-  //   } catch (err) {
-  //     console.error("🚨 Error during batch character assignment:", err.message);
-  //   }
-}
-// Todo: un-ai this!! this should just be a mapping with some randomness in the camera angle choice
 async function assignZones(sceneId) {
   try {
-    // Fetch all lines using pagination
     const rows = await getAllLinesForScene(sceneId);
     const CONTEXT_WINDOW = 15;
     const priorLines = [];
 
+    // 🧭 Role → Zone mapping
+    function getZone(role) {
+      const zoneMap = {
+        judge: "judge_sitting_at_judge_bench",
+        witness: "witness_at_witness_stand",
+        defense: "defense_table_left",
+        prosecutor: "prosecutor_table_left",
+        clerk: "clerk_box",
+      };
+      return zoneMap[role] || "wide_establishing";
+    }
+
+    // 🎥 Generate cinematic camera angle based on role, text, and recent shots
+    function getCamera({ role, text, previousShots }) {
+      const lastCamera = previousShots.at(-1)?.camera;
+      const emotional = /shock|cry|pause|silence|tears|angry|emotional/i.test(
+        text
+      );
+      const reset =
+        /court is in session|let's begin|good morning|all rise|recess/i.test(
+          text.toLowerCase()
+        );
+      const wideShots = ["wide_establishing", "wide_view_from_jury"];
+
+      const shouldInjectWide =
+        reset ||
+        (emotional && Math.random() < 0.4) ||
+        (previousShots.length % 7 === 0 && Math.random() < 0.6);
+
+      if (shouldInjectWide && lastCamera !== "wide_establishing") {
+        return Math.random() < 0.5
+          ? "wide_establishing"
+          : "wide_view_from_jury";
+      }
+
+      const cameraMap = {
+        judge: ["judge_closeup", "wide_view_from_jury"],
+        witness: ["witness_closeup", "crossExaminationFromWell"],
+        prosecutor: ["prosecutor_table", "wide_establishing"],
+        defense: ["defense_table", "wide_establishing"],
+        clerk: ["bailiff_reaction", "wide_view_from_jury"],
+      };
+
+      const options = cameraMap[role] || wideShots;
+      const filtered = options.filter((c) => c !== lastCamera);
+      const final = filtered.length ? filtered : options;
+      const index = (previousShots.length + text.length) % final.length;
+      return final[index];
+    }
+
     for (const row of rows) {
       const { line_id, line_obj } = row;
       const { character_id, role, text } = line_obj;
-      console.log(`Zone Assignment Beginning Line Object:`, line_obj);
 
-      const prompt = `
-You are assigning spatial zones and camera angles in a courtroom animation based on dialogue context.
+      console.log(`🎬 Assigning zone + camera for line ${line_id}...`);
 
-Rules:
-- The **witness** must always be in "witness_at_witness_stand".
-- **Defense** roles should only be in "defense_table_left".
-- **Prosecutors** must be in "prosecutor_table_left", "prosecutor_at_witness_stand", "prosecutor_table_right",
-- **Judge** is in "judge_sitting_at_judge_bench"
-- **Clerk** in "clerk_box".
-- Do not invent new zones. Choose the most contextually accurate location based on previous line zones and speaker roles and courtroom logic.
-Camera angles:
-- Choose a shot: "wide_establishing" or "crossExaminationFromWell" or "judge_closeup" or "witness_closeup" or "prosecutor_table" or "defense_table" or "bailiff_reaction" or "wide_view_from_jury",
+      const zone = getZone(role);
+      const camera = getCamera({ role, text, previousShots: priorLines });
 
-Return JSON only in this format:
-{
-  "zone": "...",
-  camera": "...",
-}
-
-Current line:
-{
-  "character_id": "${character_id}",
-  "role": "${role}",
-  "text": "${text}"
-}
-
-Prior lines:
-${JSON.stringify(
-  priorLines.map((l) => ({
-    character_id: l.character_id,
-    role: l.role,
-    text: l.text,
-    zone: l.zone,
-    camera: l.camera,
-  })),
-  null,
-  2
-)}
-`.trim();
-
-      const response = await openai.chat.completions.create({
-        model: "gpt-4o-mini",
-        messages: [{ role: "system", content: prompt }],
-      });
-
-      const content = response.choices[0].message.content.trim();
-      const json = content
-        .replace(/^```(?:json)?/, "")
-        .replace(/```$/, "")
-        .trim();
-
-      const { zone, camera } = JSON.parse(json);
-      console.log(`Zone assignment for line ${line_id}:`, zone, camera);
-      sendSlackMessage(
-        `Zone assignment for line ${line_id}: ${zone}, camera: ${camera}`,
-        "success",
-        "script-creation-logs"
-      );
       const updatedLineObj = {
         ...line_obj,
         zone,
         camera,
       };
 
-      const { error: updateErr } = await supabase
+      const { error } = await supabase
         .from("gs3_lines")
         .update({ line_obj: updatedLineObj })
         .eq("scene_id", sceneId)
         .eq("line_id", line_id);
 
-      if (updateErr) {
-        console.error(
-          `❌ Failed to update zone for line ${line_id}:`,
-          updateErr.message
-        );
+      if (error) {
+        console.error(`❌ Failed to update line ${line_id}:`, error.message);
       } else {
-        console.log(`🗺️ Assigned zone for line ${line_id}: ${zone}`);
+        console.log(
+          `✅ Line ${line_id} assigned zone="${zone}", camera="${camera}"`
+        );
+        sendSlackMessage(
+          `Zone assignment for line ${line_id}: ${zone}, camera: ${camera}`,
+          "success",
+          "script-creation-logs"
+        );
       }
 
-      // Update sliding context
-      priorLines.push({ character_id, role, text, zone });
+      priorLines.push({ character_id, role, text, zone, camera });
       if (priorLines.length > CONTEXT_WINDOW) priorLines.shift();
     }
 
-    console.log("✅ All zones assigned.");
+    console.log("🎉 All zones and cameras assigned successfully.");
+    sendSlackMessage(
+      `🎉 All zones and cameras assigned successfully.`,
+      "success",
+      "script-creation-logs"
+    );
+    return;
   } catch (err) {
     console.error("🚨 assignZones error:", err.message);
   }
@@ -934,7 +502,7 @@ async function generateTTS({
     );
   }
 
-  const cleanedText = text.trim();
+  const cleanedText = text.trim().toLowerCase();
   const filenameBase = `line_${String(lineIndex + 1).padStart(3, "0")}`;
   const filename = `${filenameBase}.${audioFormat === "MP3" ? "mp3" : "wav"}`;
   const destinationPath = `audio/scene_${sceneId}/${filename}`;
@@ -1164,6 +732,11 @@ async function extractCharactersFromChunk(chunkText, speakerMap) {
       prompt
     );
     console.log("📄 With input:\n", slicedInput);
+    sendSlackMessage(
+      `📤 Sending character extraction prompt to OpenAI:\n${prompt}\n\nWith input:\n${slicedInput}`,
+      "info",
+      "script-creation-logs"
+    );
 
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
@@ -1197,83 +770,81 @@ async function extractCharactersFromChunk(chunkText, speakerMap) {
 }
 
 async function processChunk(chunkText, speakerMap, previousLines) {
+  // Expect full line objects with metadata instead of plain text
   return await cleanText(chunkText, speakerMap, previousLines);
 }
 
 async function cleanText(chunkText, speakerMap, previousLines) {
-  const CONTEXT_WINDOW = 15; // Number of lines to keep in context
+  const CONTEXT_WINDOW = 15;
   try {
-    let contextPrompt = `You are cleaning and reformatting dialog from a legal transcript. Based on the prior speaker and last spoken line, continue appropriately.\n\n`;
+    let contextPrompt = `You are cleaning and formatting courtroom transcript lines into structured JSON. Each line of dialog should include:
+- character_id (use character map),
+- role,
+- posture,
+- emotion,
+- text (just the spoken text),
+- eye_target (character_id of the person being spoken to, not the speaker. Pick from speakermap. Use "audience" for general audience or unknowns),
+- pause_before (number, seconds — cinematic timing),
+
+Output an array of JSON objects — one per line. No explanations.`;
 
     if (previousLines.length) {
       const priorContext = previousLines
         .slice(-CONTEXT_WINDOW)
         .map((line) => `${line.speaker}: ${line.text}`)
         .join("\n");
-      contextPrompt += `Prior dialog for context:\n${priorContext}\n\n`;
+      contextPrompt += `\n\nPrevious dialog:\n${priorContext}`;
     }
 
-    contextPrompt += `Identify speakers using this list: ${JSON.stringify(
-      Array.from(speakerMap.values()).map((s) => {
-        return { name: s.name, role: s.role, label: s.speaker_label };
-      })
-    )}. Return dialog only, in the format "Speaker Name: line". Do not explain or summarize. Omit narration or non-dialog text. 
-      
-      ⚠️ If the transcript includes any redaction codes (such as (b)(6), (b)(7)(C), or similar), replace them with "Redacted". Ensure redacted portions are cleanly replaced and do not break sentence structure.
-      Remove any descriptions like  DIRECT EXAMINATION (cont’d) BY Mr. Cohen, but use that to identify the speaker if possible or necessary.
-      Remove any label of Q or A. Replace with character names from the list. Important: use context and judgement to determine the correct speaker. For example, make sure a witness is not questioning themselves. Also, keep the witness and questioner consistent until the script mentions a change, just like in a real trial.
-      If a witness is asking a question, it's likely a mistake unless it makes sense in context. Long speech should be split into multiple lines, make a new line where eye contact would change.
-      `;
+    contextPrompt += `\n\nSpeaker map:\n${JSON.stringify(
+      Array.from(speakerMap.entries()).map(([id, val]) => ({
+        character_id: id,
+        name: val.name,
+        role: val.role,
+        label: val.speaker_label,
+      })),
+      null,
+      2
+    )}`;
 
-    // const sampleInput = `version, how many tests could it run 18 at that time in 2010? 19 A I don't know exactly what the number was...`;
-    const sampleInput = `Q. And it says @Nishad Singh, @Alfred Xue. Who was that? 3
-    A. So Nishad, obviously, was the head of engineer. Alfred was one of the developers at FTX
-who worked for Nishad.`;
-    // const sampleOutput = `Jessica Chan: Version, how many tests could it run at that time in 2010?\nElizabeth Holmes: I don't know exactly what the number was...`;
-    const sampleOutput = `Mr. Cohen: And it says @Nishad Singh, @Alfred Xue. Who was that?\nMr. Bankman-Fried: So Nishad, obviously, was the head of engineering. Alfred was one of the developers at FTX who worked for Nishad.`;
-    console.log(
-      "\n📤 Sending transcript cleaning prompt to OpenAI:\n",
-      contextPrompt
-    );
-    sendSlackMessage(
-      `📤 Sending transcript cleaning prompt to OpenAI:`,
-      "info",
-      "script-creation-logs"
-    );
-    console.log(
-      "📄 With input (first 1000 chars):\n",
-      chunkText.slice(0, 1000)
-    );
+    const prompt = `
+Please process the following transcript into JSON. Each dialog line must return:
+- character_id
+- role
+- text
+- posture
+- emotion
+- eye_target
+- pause_before
+
+
+Transcript:
+${chunkText}
+
+⚠️ Do not explain. Return an array of JSON objects only.
+    `;
+
+    console.log(`📤 Sending chunk to OpenAI:\n`, contextPrompt);
+    console.log(`📤 Sending chunk to OpenAI:\n`, prompt);
 
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
         { role: "system", content: contextPrompt },
-        { role: "user", content: sampleInput },
-        { role: "assistant", content: sampleOutput },
-        { role: "user", content: chunkText },
+        { role: "user", content: prompt },
       ],
     });
 
-    const result = response.choices[0].message.content;
-    console.log(
-      "📥 OpenAI response (transcript chunk):\n",
-      result.slice(0, 1000)
-    );
-    sendSlackMessage(
-      `📥 OpenAI response (transcript chunk): ${result.slice(0, 100)}`,
-      "info",
-      "script-creation-logs"
-    );
-    console.log("────────────────────────────────────────────");
-
-    return result;
+    const content = response.choices[0].message.content.trim();
+    const jsonText = content
+      .replace(/^```(?:json)?\s*/i, "")
+      .replace(/```$/, "");
+    const parsedLines = JSON.parse(jsonText);
+    console.log("📥 OpenAI response (parsed):", parsedLines);
+    return parsedLines; // Return structured lines, not plain text
   } catch (error) {
-    console.error(
-      "❌ GPT-4o-mini error:",
-      error.response?.data || error.message
-    );
-    throw new Error("Failed to process chunk with GPT-4o-mini");
+    console.error("❌ GPT error in cleanText:", error.message || error);
+    throw new Error("Failed to clean transcript chunk");
   }
 }
 
@@ -1850,6 +1421,150 @@ You are a legal analyst. Given the following lines from a courtroom transcript, 
 
   res.setHeader("Content-Type", "text/plain");
   res.send(tocOutput);
+});
+
+app.get("/extract-highlights/:sceneId", async (req, res) => {
+  const { sceneId } = req.params;
+
+  const rows = await getAllLinesForScene(sceneId);
+  if (!rows?.length) {
+    return res.status(404).json({ error: "No lines found for this scene." });
+  }
+
+  const { data: scenes, error: sceneErr } = await supabase
+    .from("gs3_scenes")
+    .select("*")
+    .eq("scene_id", sceneId)
+    .single();
+
+  if (sceneErr || !scenes) {
+    return res.status(404).json({ error: "Scene metadata not found." });
+  }
+
+  const originalMetadata = scenes.metadata || {};
+  const chunkSize = 12;
+  const stepSize = 6;
+  const maxTotalDuration = 150;
+  const highlightCandidates = [];
+
+  for (let i = 0; i <= rows.length - chunkSize; i += stepSize) {
+    const chunk = rows.slice(i, i + chunkSize);
+    const chunkTextList = chunk.map(
+      (r, index) => `${index + 1}. ${r.line_obj.text}`
+    );
+    const fullChunkText = chunkTextList.join("\n");
+
+    const durationPerLine = chunk.map((line) => {
+      const pause = line.line_obj.pause_before || 0;
+      const dur = line.line_obj.viseme_data?.duration || 1.5;
+      return pause + dur;
+    });
+
+    const prompt = `
+You are a courtroom video editor. Below is a transcript chunk.
+
+1. Identify the most **dramatic subsegment**: the smallest line range that feels tense, climactic, or cliffhanger-worthy.
+2. Return a JSON object with:
+   - "score" (0.0 to 1.0)
+   - "reason" (short explanation)
+   - "best_start_index" (1-based)
+   - "best_end_index" (inclusive, 1-based)
+
+Transcript chunk:
+${fullChunkText}
+    `.trim();
+
+    try {
+      const response = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [{ role: "system", content: prompt }],
+      });
+
+      const parsed = JSON.parse(
+        response.choices[0].message.content
+          .replace(/^```(?:json)?/, "")
+          .replace(/```$/, "")
+          .trim()
+      );
+
+      const { best_start_index, best_end_index } = parsed;
+      const start = Math.max(best_start_index - 1, 0);
+      const end = Math.min(best_end_index, chunk.length - 1);
+
+      const selectedLines = chunk.slice(start, end + 1);
+      const selectedDuration = durationPerLine
+        .slice(start, end + 1)
+        .reduce((a, b) => a + b, 0);
+
+      highlightCandidates.push({
+        ...parsed,
+        lineObjs: selectedLines.map((r) => ({
+          line_id: r.line_id,
+          line_obj: r.line_obj,
+        })),
+        totalDuration: selectedDuration,
+      });
+    } catch (err) {
+      console.warn(
+        `⚠️ Failed to extract subsegment from chunk ${i}-${i + chunkSize}:`,
+        err.message
+      );
+    }
+  }
+
+  // 5. Sort by score, collect until we hit max duration
+  const sorted = highlightCandidates.sort((a, b) => b.score - a.score);
+  const highlights = [];
+  let runningTime = 0;
+
+  for (const h of sorted) {
+    if (runningTime + h.totalDuration > maxTotalDuration) continue;
+    highlights.push(h);
+    runningTime += h.totalDuration;
+  }
+
+  const flatLines = highlights.flatMap((h) => h.lineObjs);
+
+  // 6. Create new scene
+  const newSceneId = crypto.randomUUID();
+  const newSceneMetadata = {
+    ...originalMetadata,
+    title: `Highlights from ${originalMetadata.title || sceneId}`,
+    summary: `This is a cinematic highlight reel extracted from scene ${sceneId}.`,
+    source_scene: sceneId,
+    extracted_at: new Date().toISOString(),
+    runtime_seconds: runningTime.toFixed(2),
+  };
+
+  await saveToSupabase("gs3_scenes", {
+    scene_id: newSceneId,
+    scene_name: `Highlights from ${sceneId}`,
+    metadata: newSceneMetadata,
+  });
+
+  // 7. Save selected lines
+  for (let i = 0; i < flatLines.length; i++) {
+    await saveToSupabase(
+      "gs3_lines",
+      {
+        scene_id: newSceneId,
+        line_id: i + 1,
+        line_obj: flatLines[i].line_obj,
+      },
+      { onConflict: ["scene_id", "line_id"] }
+    );
+  }
+
+  console.log(
+    `🎬 Highlight scene created: ${newSceneId} with ${flatLines.length} lines`
+  );
+
+  res.json({
+    new_scene_id: newSceneId,
+    total_runtime_seconds: runningTime.toFixed(2),
+    highlight_line_ids: flatLines.map((l) => l.line_id),
+    line_objs: flatLines.map((l) => l.line_obj),
+  });
 });
 
 app.listen(port, () => {

@@ -65,17 +65,43 @@ export default function CourtroomScene({
   const [activeSpeakerId, setActiveSpeakerId] = useState(null);
   // State to track the audio's current time for viseme timing.
   const [currentAudioTime, setCurrentAudioTime] = useState(0);
-  // Optional: dynamically build from your lines if you want
+
+  const [showDefaultClerk, setShowDefaultClerk] = useState(true);
+  const [showDefaultJudge, setShowDefaultJudge] = useState(false);
+  const [showJury, setShowJury] = useState(false);
 
   const aliasMap = useMemo(() => {
     const map = {
       prosecutor: "prosecutor1",
       prosecutor2: "prosecutor1",
       defense: "defense1",
-
       jury: "jury-2",
     };
 
+    // Collect all audience IDs
+    const audienceIds = [];
+    [5, 8, 11, 14].forEach((z) => {
+      [-12, -7.5, -3.5, 3.5, 7.5, 12].forEach((x) => {
+        // Skip the known skip pattern
+        const skip = [
+          [-7.5, 5],
+          [7.5, 8],
+          [-3.5, 11],
+          [12, 14],
+        ].some(([sx, sz]) => sx === x && sz === z);
+        if (!skip) {
+          audienceIds.push(`audience-${x}-${z}`);
+        }
+      });
+    });
+
+    // Pick a random one
+    const randomAudience =
+      audienceIds[Math.floor(Math.random() * audienceIds.length)];
+
+    map.audience = randomAudience;
+
+    // Preserve role-to-character_id mapping from lines
     lines.forEach(({ line_obj }) => {
       const { role, character_id } = line_obj;
       if (role && character_id && !map[role]) {
@@ -697,6 +723,10 @@ export default function CourtroomScene({
       position: [0, 2, -18],
       rotation: [0, 0, 0],
     },
+    default_judge_sitting_at_judge_bench: {
+      position: [0, 2, -18],
+      rotation: [0, Math.PI, 0],
+    },
     witness_at_witness_stand: {
       position: [-10, 1.1, -15],
       rotation: [0, Math.PI, 0],
@@ -727,6 +757,7 @@ export default function CourtroomScene({
       rotation: [0, Math.PI / 1.2, 0],
     },
     clerk_box: { position: [10, 1, -15], rotation: [0, 0, 0] },
+    default_clerk_box: { position: [10, 1, -15], rotation: [0, Math.PI, 0] },
   };
 
   const getLocationPose = (key) =>
@@ -1021,7 +1052,9 @@ export default function CourtroomScene({
                             <Character
                               key="judge"
                               {...getLocationPose(
-                                "judge_sitting_at_judge_bench"
+                                showDefaultJudge
+                                  ? "default_judge_sitting_at_judge_bench"
+                                  : "judge_sitting_at_judge_bench"
                               )}
                               onReady={(headRef) =>
                                 registerCharacter("judge", headRef, "judge")
@@ -1101,23 +1134,25 @@ export default function CourtroomScene({
                   }}
                 /> */}
                 {/* Clerk (always in clerk_box) */}
-                {/* <Character
-                  key="clerk"
-                  {...getLocationPose("clerk_box")}
-                  onReady={(headRef) =>
-                    registerCharacter("clerk", headRef, "clerk")
-                  }
-                  params={{
-                    sitting: true,
-                    role: "clerk",
-                    characterId: "clerk",
-                    style: getStyleForCharacter("clerk", "clerk"),
-                    eyeTargetRef: lookTargetRef,
-                    speakerTargetRef,
-                    activeSpeakerId,
-                    emotion: "neutral",
-                  }}
-                /> */}
+                {showDefaultClerk && (
+                  <Character
+                    key="clerk"
+                    {...getLocationPose("default_clerk_box")}
+                    onReady={(headRef) =>
+                      registerCharacter("clerk", headRef, "clerk")
+                    }
+                    params={{
+                      sitting: true,
+                      role: "clerk",
+                      characterId: "clerk",
+                      style: getStyleForCharacter("clerk", "clerk"),
+                      eyeTargetRef: lookTargetRef,
+                      speakerTargetRef,
+                      activeSpeakerId,
+                      emotion: "neutral",
+                    }}
+                  />
+                )}
                 .{/* Stenographer (always in stenographer_station) */}
                 <Character
                   key="stenographer"
@@ -1136,32 +1171,36 @@ export default function CourtroomScene({
                     emotion: "neutral",
                   }}
                 />
-                {/* Jury (6 members fixed position) */}
-                {[...Array(6)].map((_, i) => (
-                  <Character
-                    key={`jury-${i}`}
-                    {...getLocationPose("jury_box")}
-                    position={[18, 0, -13 + i * 1.3]}
-                    rotation={[0, Math.PI / 2, 0]}
-                    onReady={(headRef) =>
-                      registerCharacter(
-                        `jury-${i}`,
-                        headRef,
-                        i === 2 ? "jury" : null
-                      )
-                    }
-                    params={{
-                      sitting: true,
-                      role: "jury",
-                      characterId: `jury-${i}`,
-                      style: getStyleForCharacter(`jury-${i}`, "jury"),
-                      eyeTargetRef: lookTargetRef,
-                      speakerTargetRef,
-                      activeSpeakerId,
-                      emotion: "neutral",
-                    }}
-                  />
-                ))}
+                {showJury && (
+                  <>
+                    {/* Jury (6 members fixed position) */}
+                    {[...Array(6)].map((_, i) => (
+                      <Character
+                        key={`jury-${i}`}
+                        {...getLocationPose("jury_box")}
+                        position={[18, 0, -13 + i * 1.3]}
+                        rotation={[0, Math.PI / 2, 0]}
+                        onReady={(headRef) =>
+                          registerCharacter(
+                            `jury-${i}`,
+                            headRef,
+                            i === 2 ? "jury" : null
+                          )
+                        }
+                        params={{
+                          sitting: true,
+                          role: "jury",
+                          characterId: `jury-${i}`,
+                          style: getStyleForCharacter(`jury-${i}`, "jury"),
+                          eyeTargetRef: lookTargetRef,
+                          speakerTargetRef,
+                          activeSpeakerId,
+                          emotion: "neutral",
+                        }}
+                      />
+                    ))}
+                  </>
+                )}
               </>
             )}
 
@@ -1198,6 +1237,13 @@ export default function CourtroomScene({
                     key={`audience-${x}-${z}`}
                     position={[x, 0, z]}
                     rotation={[0, 0, 0]}
+                    onReady={(headRef) =>
+                      registerCharacter(
+                        `audience-${x}-${z}`,
+                        headRef,
+                        "audience"
+                      )
+                    }
                     params={{
                       sitting: true,
                       colorTorso: ["#b22222", "#4682b4", "#daa520", "#008b8b"][

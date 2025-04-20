@@ -4,6 +4,11 @@ import path from "path";
 import FormData from "form-data";
 import axios from "axios";
 
+// Toggle between classic server and ML server
+const USE_ML_SERVER = false;
+const SERVER_PORT = USE_ML_SERVER ? 3002 : 3001;
+const SERVER_URL = `http://localhost:${SERVER_PORT}/upload`;
+
 // Disable built-in body parsing
 export const config = {
   api: {
@@ -48,24 +53,20 @@ export default async function handler(req, res) {
       const formData = new FormData();
       formData.append("pdf", fileStream, filename);
 
-      const response = await axios.post(
-        "http://localhost:3001/upload",
-        formData,
-        {
-          headers: {
-            ...formData.getHeaders(),
-          },
-          maxContentLength: Infinity,
-          maxBodyLength: Infinity,
-        }
-      );
+      const response = await axios.post(SERVER_URL, formData, {
+        headers: {
+          ...formData.getHeaders(),
+        },
+        maxContentLength: Infinity,
+        maxBodyLength: Infinity,
+      });
 
       fs.unlinkSync(filePath); // ✅ Clean up
 
       res.status(200).json(response.data);
     } catch (err) {
       console.error("Forwarding error:", err.response?.data || err.message);
-      res.status(500).json({ error: "Failed to send file to PDF server" });
+      res.status(500).json({ error: "Failed to send file to server" });
     }
   });
 }
