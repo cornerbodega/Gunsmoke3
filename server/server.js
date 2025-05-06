@@ -197,16 +197,6 @@ async function getAllLinesForScene(sceneId) {
 
   return allRows;
 }
-const stringSimilarity = require("string-similarity");
-
-function extractSpeakerAndText(line) {
-  const separatorIndex = line.indexOf(":");
-  if (separatorIndex === -1) return { speaker: "", text: line.trim() };
-  return {
-    speaker: line.slice(0, separatorIndex).trim(),
-    text: line.slice(separatorIndex + 1).trim(),
-  };
-}
 
 app.post("/upload", upload.single("pdf"), async (req, res) => {
   try {

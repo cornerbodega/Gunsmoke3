@@ -1,0 +1,26 @@
+{
+  "name": "gunsmoke3",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@react-three/cannon": "^6.6.0",
+    "@react-three/drei": "^10.0.5",
+    "@react-three/fiber": "^9.1.0",
+    "@supabase/supabase-js": "^2.49.4",
+    "axios": "^1.8.4",
+    "form-data": "^4.0.2",
+    "formidable": "^3.5.2",
+    "next": "15.2.4",
+    "pdfjs-dist": "^5.0.375",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "three": "^0.174.0",
+    "uuid": "^11.1.0"
+  }
+}
