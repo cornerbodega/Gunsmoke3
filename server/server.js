@@ -794,7 +794,7 @@ async function extractCharactersFromChunk(chunkText, speakerMap) {
     - Full name
     - Speaker label (e.g., "Q", "A", "THE COURT")
     - Role (one of these: judge, witness, prosecutor, defense)
-    - A normalized ID with (gender_name for database keys)
+    - A normalized ID with (the_court for judge, gender_name for everyone else)
     Return an array like:
     
     [
@@ -820,7 +820,7 @@ async function extractCharactersFromChunk(chunkText, speakerMap) {
         "name": "Judge Cannon",
         "speaker_label": "THE COURT",
         "role": "judge",
-        "id": "judge_cannon"
+        "id": "the_court"
       }
     ]
 
@@ -879,395 +879,124 @@ async function processChunk(chunkText, speakerMap, previousLines) {
 
 async function cleanText(chunkText, speakerMap, previousLines) {
   const sampleInput = `
-
-(Proceedings commenced at 9:06 a.m. as follows:)
-THE COURT: Good morning. Be seated.
-MR. MARTINEZ: Good morning, Your Honor.
-THE COURT: We are with the direct of Mr. Arce, right,
-is going to continue?
-MR. MARTINEZ: Yes, Your Honor. I have a procedural
-question I would like to address with the Court at the
-beginning.
-THE COURT: Go ahead.
-MR. MARTINEZ: With respect to the pro offer, Your
-Honor, I have two questions --
-THE COURT: Wait a minute. You're talking about an
-offer of proof that you intend to make sometime in the future,
-right?
-MR. MARTINEZ: So one question was when you want me to
-do it.
-THE COURT: Right. Okay.
-MR. MARTINEZ: And if you want me to do it in your
-presence or just to the court reporter? I'd prefer to read it
-at this time, but I don't know when you want it.
-THE COURT: Well, you want to make it orally, right?
-MR. MARTINEZ: Yes.
-THE COURT: Let's do it right after lunch, how's that?
-MR. MARTINEZ: That's fine, Your Honor. I just needed
-1
-2
-3
-4
-5
-6
-7
-8
-9
-10
-11
-12
-13
-14
-15
-16
-17
-18
-19
-20
-21
-22
-23
-24
-25
-UNITED STATES DISTRICT COURT
-6
-to know when you wanted it.
-THE COURT: Let's do that. That's fine.
-MR. MARTINEZ: Okay. Thank you.
-SEAN ARCE, WITNESS, PREVIOUSLY SWORN
-DIRECT EXAMINATION (RESUMED)
-BY MR. MARTINEZ:
-Q. Good morning, Mr. Arce.
-A. Good morning.
-Q. I'm going to try and stick to one mic and not wander.
-MR. MARTINEZ: Let me ask you, can you please bring up
-Exhibit 541? I believe 541 has been admitted or is stipulated
-to as an exhibit, Your Honor. These are the Huppenthal
-findings. I was checking with counsel that she agreed it was
-stipulated to.
-MS. COOPER: There's just a housekeeping matter that
-we would like to address, if it's all right with the Court.
-MR. MARTINEZ: Can we deal --
-THE COURT: I'm sorry, a what matter?
-MS. COOPER: A housekeeping matter with respect to a
-couple of exhibits. But we can address it later.
-THE COURT: All right. Fine. Let's do it later.
-MR. MARTINEZ: Okay. I just wanted to confirm on
-541 --
-MS. COOPER: Yes.
-MR. MARTINEZ: -- it's an admitted exhibit.
-1
-2
-3
-4
-5
-6
-7
-8
-9
-10
-11
-12
-13
-14
-15
-16
-17
-18
-19
-20
-21
-22
-23
-24
-25
-UNITED STATES DISTRICT COURT
-7
-MR. QUINN: Richard, it's admitted.
-MS. COOPER: Yes, Your Honor.
-MR. MARTINEZ: Thank you.
-BY MR. MARTINEZ:
-Q. Mr. Arce, I just want to give you a minute to look through
-these three pages, so if you could just read Page 1, Page 2,`;
+--- Page 1 --- DEPP v NGN & WOOTTON 07 JUL Claim No QB-2018-006323 IN THE HIGH COURT OF JUSTICE QUEEN'S BENCH DIVISION MEDIA AND COMMUNICATIONS LIST Royal Courts of Justice, Strand, London, WC2A 2LL Tuesday, Tth July, 2020 Before: MR. JUSTICE NICOL BETWEEN. JOHN CHRISTOPHER DEPP Il Claimant -and- (1) NEWS GROUP NEWSPAPERS LIMITED (2) DAN WOOTTON Defendants (Transcript of the Stenograph Notes of Marten Walsh Cherer Limited, 2nd Floor, Quality House, 9 Quality Court, Chancery Lane, London, WC2A THP. Telephone No: 020 7067 2900. Fax No: 020 7831 6864. Email: info@martenwalshcherer com. www. martenwalsheherer com) MR. DAVID SHERBORNE, MS. ELEANOR LAWS QC and MS. KATE WILSON (instructed by Schillings) appeared for the Claimant. MS. SASHA WASS QC, MR. ADAM WOLANSKI QC and MS. CLARA HAMER (instructed by Simons Muirhead & Burton) appeared for the Defendants. PROCEEDINGS (DAY I) (TRANSCRIPT PREPARED WITHOUT ACCESS TO COURT BUNDLES) [Page 1] --- Page 2 --- 1 HOUSEKEEPING 2 MR. JUSTICE NICOL: Before the trial begins, I want to say a few 3 words by way of introduction. This is the trial of the libel 4 action which Johnny Depp, the second the claimant, usually 5 known as Johnny Depp, has brought against News Group [3 Newspapers Limited, the publishers of The Sun, and a 7 journalist, Daniel Wootton. 8 There are some features which the trial will have that 9 are the same as any other trial. There are others which are 10 necessarily different. First, the features which are common 11 to other trials. The trial is by judge alone. There is no 12 jury. Tt will be for me, Nicol J, as the judge, to make any 13 necessary findings of fact and rule on any issues of law, 14 Next, it will be important for there to be silence when 15 witnesses give their evidence and when the barristers are 16 ‘making their submissions. Next, as with all trials in England 17 and Wales, there may be no photography of anyone in court. 18 Our legislation prohibits the taking of both still and moving 19 pictures or sketching anyone while in court. That includes 20 screen shots. The law also prohibits sound recordings of the 21 court proceedings. Disregarding these restrictions can be 22 contempt of court and can lead to imprisonment. There will be 23 an official audio recording of the trial and anyone may 24 purchase a transeript. Because it is important that the 25 evidence can proceed without distraction, all mobile phones MARTEN WALSH CHERER LTD ~~ 2ND FLOOR, 6-9 QUALIT: TEL: (020) 7067 2900 E-MAIL: info@mart --- Page 3 --- Y 2020 PROCEEDINGS - DAY 1 [Page 2] 1 HOUSEKEEPING 2 should be switched to silent. Anyone may take notes of the 3 hearing as it continues. Journalists, but only journalists, 4 may report live by Twitter or other similar live text 5 platforms. [3 Itun to the features of this trial which are less 7 usual. COVID-19 restrictions mean that social distancing must 8 be observed in court. Currently, that requires no one to be 9 less than two metres from else. That severely limits the 10 numbers that can be in this courtroom, court 13, even taking 11 into account the opening of the public gallery in this court, 12 which has occurred. These limits mean that not even all the 13 lawyers or representatives of the parties can be accommodated 14 in this particular courtroom. For that reason, the 15 Court Service has made a second courtroom available for the 16 parties and their lawyers who cannot be accommodated in this 17 room. 18 For the most par, this trial is being conducted in 19 public. That means that, in principle, the press and public 20 are free to attend. However, even in normal times, the space 21 in courtrooms sets a practical limit on the numbers who can be 22 accommodated. The COVID-19 restrictions have added a further 23 practical dimension to these practical problems so the 24 Court Service has made three further spill-over courtrooms 25 available for the press and public. That makes four [Page 3] --- Page 4 --- 1 HOUSEKEEPING 2 spill-over courtrooms and, including this one, five in total 3 Tam grateful to the Court Service for the efforts that they 4 have made in this regard. 5 ‘The spill-over courtrooms will be linked to this one, so 6 that those in the other courtrooms will be able to see and 7 hear everything that takes place in this room, what I shall 8 call the principal courtroom. Again, 1 am grateful to the 9 Court Service for the efforts that they have made to put these 10 arrangements in place. All five rooms will be treated as part 11 of the court. There will be one or more ushers in each room. 12 ‘The restrictions which I have mentioned will apply just as 13 much to those who are in the spill-over courtrooms. I have 14 said that most of the trial will take place in public. Atan 15 earlier hearing, T ruled that parts will be in private. When 16 those parts oceur, the press and public will be excluded, and 17 only the parties and their lawyers may remain. 18 Some of the evidence will be given in the usual way by 19 witnesses coming into the witness box in this court 13. 20 However, I have previously agreed that other witnesses may 21 give evidence via video link. These are witnesses who live in 22 the USA, the Bahamas, and in Australia. The systems which 23 have been set up mean that in each of the spill-over 24 courtrooms, their evidence can be seen and heard. 25 ‘The trial is expected to last three weeks. After today, [1] (Pages 0 to 3) ( COURT, CHANCERY LANE LONDON, WC2A 1HP enwalshcherer.com FAX: (020) 7831 6864 --- Page 5 --- DEPP v NGN & WOOTTON 07 JUL [Page 4] 1 HOUSEKEEPING 2 we will start each day's hearing at 10 a.m. We will take an 3 hour for lunch at about 1 p.m. We will finish at about 4.30 a p.m. It may be necessary to have breaks in the middle of the 5 morning and the afternoon, particularly if a witness has been [3 giving evidence for a long time, but I will keep these under 7 review. Even so, the timetable is likely to be tight 8 To save time, I have directed that the parties must set 9 out their opening statements in writing instead of giving them 10 orally. Copies of those statements will be available at the 11 time when that party would normally deliver them orally. 12 Likewise, the skeleton arguments in which each party sets out 13 the outline of their case can be obtained from that party's 14 solicitors, Schillings in the case of the claimant, Simons 15 Muirhead & Burton in the case of the defendants. Neither the 16 openings nor the skeleton arguments will refer to those parts 17 of the trial that wil take place in private. 18 Now, Mr. Sherborne. 19 MR. SHERBORNE: May it please your Lordship, I appear in this 20 trial with Ms. Laws and Ms. Wilson, who sits in the jury box, 21 on behalf of the claimant, Johnny Depp. My leamed friends 22 Ms. Wass, who sits to my right, Mr. Wolanski who sits behind 23 Ms. Wilson in the jury box, and Ms. Hamer, who sits behind me 24 to my right, appear for the defendants, News Group Newspapers 25 Limited, the publishers of The Sun newspaper, and its [Page 5] --- Page 6 --- 1 HOUSEKEEPING 2 exceutive editor, Mr. Wootton, 3 Can I begin with `;
 
   const sampleOutput = `${JSON.stringify([
     {
-      character_id: "judge_smith",
+      character_id: "the_court",
       role: "judge",
       posture: "seated",
       emotion: "neutral",
-      text: "Good morning. Be seated.",
+      text: "Before the trial begins, I want to say a few words by way of introduction.",
       eye_target: "audience",
       pause_before: 0.5,
     },
     {
-      character_id: "mr_martinez",
-      role: "prosecutor",
-      posture: "standing",
-      emotion: "neutral",
-      text: "Good morning, Your Honor.",
-      eye_target: "judge_smith",
-      pause_before: 0.5,
-    },
-    {
-      character_id: "judge_smith",
+      character_id: "the_court",
       role: "judge",
       posture: "seated",
       emotion: "neutral",
-      text: "We are with the direct of Mr. Arce, right, is going to continue?",
-      eye_target: "mr_martinez",
-      pause_before: 1,
-    },
-    {
-      character_id: "mr_martinez",
-      role: "prosecutor",
-      posture: "standing",
-      emotion: "neutral",
-      text: "Yes, Your Honor. I have a procedural question I would like to address with the Court at the beginning.",
-      eye_target: "judge_smith",
+      text: "This is the trial of the libel action which Johnny Depp, the claimant, has brought against News Group Newspapers Limited, the publishers of The Sun, and Daniel Wootton.",
+      eye_target: "audience",
       pause_before: 0.5,
     },
     {
-      character_id: "judge_smith",
+      character_id: "the_court",
       role: "judge",
       posture: "seated",
       emotion: "neutral",
-      text: "Go ahead.",
-      eye_target: "mr_martinez",
+      text: "There are some features which the trial will have that are the same as any other trial. There are others which are necessarily different.",
+      eye_target: "audience",
       pause_before: 0.5,
     },
     {
-      character_id: "mr_martinez",
-      role: "prosecutor",
-      posture: "standing",
-      emotion: "neutral",
-      text: "With respect to the pro offer, Your Honor, I have two questions --",
-      eye_target: "judge_smith",
-      pause_before: 0.5,
-    },
-    {
-      character_id: "judge_smith",
-      role: "judge",
-      posture: "seated",
-      emotion: "curious",
-      text: "Wait a minute. You're talking about an offer of proof that you intend to make sometime in the future, right?",
-      eye_target: "mr_martinez",
-      pause_before: 0.7,
-    },
-    {
-      character_id: "mr_martinez",
-      role: "prosecutor",
-      posture: "standing",
-      emotion: "neutral",
-      text: "So one question was when you want me to do it.",
-      eye_target: "judge_smith",
-      pause_before: 0.5,
-    },
-    {
-      character_id: "judge_smith",
+      character_id: "the_court",
       role: "judge",
       posture: "seated",
       emotion: "neutral",
-      text: "Right. Okay.",
-      eye_target: "mr_martinez",
+      text: "The trial is by judge alone. There is no jury.",
+      eye_target: "audience",
       pause_before: 0.5,
     },
     {
-      character_id: "mr_martinez",
-      role: "prosecutor",
-      posture: "standing",
-      emotion: "neutral",
-      text: "And if you want me to do it in your presence or just to the court reporter? I'd prefer to read it at this time, but I don't know when you want it.",
-      eye_target: "judge_smith",
-      pause_before: 0.5,
-    },
-    {
-      character_id: "judge_smith",
+      character_id: "the_court",
       role: "judge",
       posture: "seated",
       emotion: "neutral",
-      text: "Well, you want to make it orally, right?",
-      eye_target: "mr_martinez",
+      text: "It will be for me to make any necessary findings of fact and rule on any issues of law.",
+      eye_target: "audience",
+      pause_before: 0.5,
+    },
+    {
+      character_id: "the_court",
+      role: "judge",
+      posture: "seated",
+      emotion: "firm",
+      text: "There may be no photography, screenshots, or sound recordings in court. Breaching this can lead to imprisonment.",
+      eye_target: "audience",
       pause_before: 0.6,
     },
     {
-      character_id: "mr_martinez",
-      role: "prosecutor",
-      posture: "standing",
-      emotion: "neutral",
-      text: "Yes.",
-      eye_target: "judge_smith",
-      pause_before: 0.3,
-    },
-    {
-      character_id: "judge_smith",
+      character_id: "the_court",
       role: "judge",
       posture: "seated",
       emotion: "neutral",
-      text: "Let's do it right after lunch, how's that?",
-      eye_target: "mr_martinez",
+      text: "COVID-19 restrictions require everyone in court to maintain a distance of at least two metres.",
+      eye_target: "audience",
       pause_before: 0.5,
     },
     {
-      character_id: "mr_martinez",
-      role: "prosecutor",
-      posture: "standing",
-      emotion: "neutral",
-      text: "That's fine, Your Honor. I just needed to know when you wanted it.",
-      eye_target: "judge_smith",
-      pause_before: 0.5,
-    },
-    {
-      character_id: "judge_smith",
+      character_id: "the_court",
       role: "judge",
       posture: "seated",
-      emotion: "neutral",
-      text: "Let's do that. That's fine.",
-      eye_target: "mr_martinez",
-      pause_before: 0.5,
-    },
-    {
-      character_id: "mr_martinez",
-      role: "prosecutor",
-      posture: "standing",
       emotion: "grateful",
-      text: "Okay. Thank you.",
-      eye_target: "judge_smith",
-      pause_before: 0.4,
-    },
-    {
-      character_id: "mr_martinez",
-      role: "prosecutor",
-      posture: "standing",
-      emotion: "neutral",
-      text: "Good morning, Mr. Arce.",
-      eye_target: "mr_arce",
+      text: "I am grateful to the Court Service for arranging spill-over courtrooms to accommodate the public and press.",
+      eye_target: "audience",
       pause_before: 0.5,
     },
     {
-      character_id: "mr_arce",
-      role: "witness",
-      posture: "seated",
-      emotion: "neutral",
-      text: "Good morning.",
-      eye_target: "mr_martinez",
-      pause_before: 0.5,
-    },
-    {
-      character_id: "mr_martinez",
-      role: "prosecutor",
-      posture: "standing",
-      emotion: "neutral",
-      text: "I'm going to try and stick to one mic and not wander.",
-      eye_target: "mr_arce",
-      pause_before: 0.5,
-    },
-    {
-      character_id: "mr_martinez",
-      role: "prosecutor",
-      posture: "standing",
-      emotion: "neutral",
-      text: "Let me ask you, can you please bring up Exhibit 541? I believe 541 has been admitted or is stipulated to as an exhibit, Your Honor. These are the Huppenthal findings. I was checking with counsel that she agreed it was stipulated to.",
-      eye_target: "judge_smith",
-      pause_before: 0.5,
-    },
-    {
-      character_id: "mr_cooper",
-      role: "defense",
-      posture: "standing",
-      emotion: "neutral",
-      text: "There's just a housekeeping matter that we would like to address, if it's all right with the Court.",
-      eye_target: "judge_smith",
-      pause_before: 0.5,
-    },
-    {
-      character_id: "mr_martinez",
-      role: "prosecutor",
-      posture: "standing",
-      emotion: "neutral",
-      text: "Can we deal --",
-      eye_target: "judge_smith",
-      pause_before: 0.5,
-    },
-    {
-      character_id: "judge_smith",
-      role: "judge",
-      posture: "seated",
-      emotion: "confused",
-      text: "I'm sorry, a what matter?",
-      eye_target: "mr_cooper",
-      pause_before: 0.5,
-    },
-    {
-      character_id: "mr_cooper",
-      role: "defense",
-      posture: "standing",
-      emotion: "neutral",
-      text: "A housekeeping matter with respect to a couple of exhibits. But we can address it later.",
-      eye_target: "judge_smith",
-      pause_before: 0.5,
-    },
-    {
-      character_id: "judge_smith",
+      character_id: "the_court",
       role: "judge",
       posture: "seated",
       emotion: "neutral",
-      text: "All right. Fine. Let's do it later.",
-      eye_target: "mr_cooper",
+      text: "Some witnesses will give evidence in court, others via video link from the USA, the Bahamas, and Australia.",
+      eye_target: "audience",
       pause_before: 0.5,
     },
     {
-      character_id: "mr_martinez",
-      role: "prosecutor",
-      posture: "standing",
-      emotion: "neutral",
-      text: "Okay. I just wanted to confirm on 541 --",
-      eye_target: "mr_cooper",
-      pause_before: 0.5,
-    },
-    {
-      character_id: "mr_cooper",
-      role: "defense",
-      posture: "standing",
-      emotion: "neutral",
-      text: "Yes.",
-      eye_target: "mr_martinez",
-      pause_before: 0.4,
-    },
-    {
-      character_id: "mr_quinn",
-      role: "prosecutor",
+      character_id: "the_court",
+      role: "judge",
       posture: "seated",
       emotion: "neutral",
-      text: "Richard, it's admitted.",
-      eye_target: "mr_martinez",
-      pause_before: 0.4,
+      text: "The trial is expected to last three weeks. We will start each day's hearing at 10 a.m.",
+      eye_target: "audience",
+      pause_before: 0.5,
     },
     {
-      character_id: "mr_cooper",
-      role: "defense",
-      posture: "standing",
+      character_id: "the_court",
+      role: "judge",
+      posture: "seated",
       emotion: "neutral",
-      text: "Yes, Your Honor.",
-      eye_target: "judge_smith",
-      pause_before: 0.4,
+      text: "To save time, opening statements will be submitted in writing.",
+      eye_target: "audience",
+      pause_before: 0.5,
     },
     {
-      character_id: "mr_martinez",
+      character_id: "mr_sherborne",
+      role: "prosecutor",
+      posture: "standing",
+      emotion: "respectful",
+      text: "May it please your Lordship, I appear with Ms. Laws and Ms. Wilson on behalf of the claimant, Johnny Depp.",
+      eye_target: "the_court",
+      pause_before: 0.5,
+    },
+    {
+      character_id: "mr_sherborne",
       role: "prosecutor",
       posture: "standing",
       emotion: "neutral",
-      text: "Thank you.",
-      eye_target: "judge_smith",
-      pause_before: 0.4,
-    },
-    {
-      character_id: "mr_martinez",
-      role: "prosecutor",
-      posture: "standing",
-      emotion: "neutral",
-      text: "Mr. Arce, I just want to give you a minute to look through these three pages, so if you could just read Page 1, Page 2,",
-      eye_target: "mr_arce",
+      text: "My learned friends Ms. Wass, Mr. Wolanski, and Ms. Hamer appear for the defendants.",
+      eye_target: "the_court",
       pause_before: 0.5,
     },
   ])}`;

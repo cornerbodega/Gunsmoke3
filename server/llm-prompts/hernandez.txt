@@ -1,0 +1,394 @@
+  const sampleInput = `
+
+(Proceedings commenced at 9:06 a.m. as follows:)
+THE COURT: Good morning. Be seated.
+MR. MARTINEZ: Good morning, Your Honor.
+THE COURT: We are with the direct of Mr. Arce, right,
+is going to continue?
+MR. MARTINEZ: Yes, Your Honor. I have a procedural
+question I would like to address with the Court at the
+beginning.
+THE COURT: Go ahead.
+MR. MARTINEZ: With respect to the pro offer, Your
+Honor, I have two questions --
+THE COURT: Wait a minute. You're talking about an
+offer of proof that you intend to make sometime in the future,
+right?
+MR. MARTINEZ: So one question was when you want me to
+do it.
+THE COURT: Right. Okay.
+MR. MARTINEZ: And if you want me to do it in your
+presence or just to the court reporter? I'd prefer to read it
+at this time, but I don't know when you want it.
+THE COURT: Well, you want to make it orally, right?
+MR. MARTINEZ: Yes.
+THE COURT: Let's do it right after lunch, how's that?
+MR. MARTINEZ: That's fine, Your Honor. I just needed
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+UNITED STATES DISTRICT COURT
+6
+to know when you wanted it.
+THE COURT: Let's do that. That's fine.
+MR. MARTINEZ: Okay. Thank you.
+SEAN ARCE, WITNESS, PREVIOUSLY SWORN
+DIRECT EXAMINATION (RESUMED)
+BY MR. MARTINEZ:
+Q. Good morning, Mr. Arce.
+A. Good morning.
+Q. I'm going to try and stick to one mic and not wander.
+MR. MARTINEZ: Let me ask you, can you please bring up
+Exhibit 541? I believe 541 has been admitted or is stipulated
+to as an exhibit, Your Honor. These are the Huppenthal
+findings. I was checking with counsel that she agreed it was
+stipulated to.
+MS. COOPER: There's just a housekeeping matter that
+we would like to address, if it's all right with the Court.
+MR. MARTINEZ: Can we deal --
+THE COURT: I'm sorry, a what matter?
+MS. COOPER: A housekeeping matter with respect to a
+couple of exhibits. But we can address it later.
+THE COURT: All right. Fine. Let's do it later.
+MR. MARTINEZ: Okay. I just wanted to confirm on
+541 --
+MS. COOPER: Yes.
+MR. MARTINEZ: -- it's an admitted exhibit.
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+UNITED STATES DISTRICT COURT
+7
+MR. QUINN: Richard, it's admitted.
+MS. COOPER: Yes, Your Honor.
+MR. MARTINEZ: Thank you.
+BY MR. MARTINEZ:
+Q. Mr. Arce, I just want to give you a minute to look through
+these three pages, so if you could just read Page 1, Page 2,`;
+
+  const sampleOutput = `${JSON.stringify([
+    {
+      character_id: "judge_smith",
+      role: "judge",
+      posture: "seated",
+      emotion: "neutral",
+      text: "Good morning. Be seated.",
+      eye_target: "audience",
+      pause_before: 0.5,
+    },
+    {
+      character_id: "mr_martinez",
+      role: "prosecutor",
+      posture: "standing",
+      emotion: "neutral",
+      text: "Good morning, Your Honor.",
+      eye_target: "judge_smith",
+      pause_before: 0.5,
+    },
+    {
+      character_id: "judge_smith",
+      role: "judge",
+      posture: "seated",
+      emotion: "neutral",
+      text: "We are with the direct of Mr. Arce, right, is going to continue?",
+      eye_target: "mr_martinez",
+      pause_before: 1,
+    },
+    {
+      character_id: "mr_martinez",
+      role: "prosecutor",
+      posture: "standing",
+      emotion: "neutral",
+      text: "Yes, Your Honor. I have a procedural question I would like to address with the Court at the beginning.",
+      eye_target: "judge_smith",
+      pause_before: 0.5,
+    },
+    {
+      character_id: "judge_smith",
+      role: "judge",
+      posture: "seated",
+      emotion: "neutral",
+      text: "Go ahead.",
+      eye_target: "mr_martinez",
+      pause_before: 0.5,
+    },
+    {
+      character_id: "mr_martinez",
+      role: "prosecutor",
+      posture: "standing",
+      emotion: "neutral",
+      text: "With respect to the pro offer, Your Honor, I have two questions --",
+      eye_target: "judge_smith",
+      pause_before: 0.5,
+    },
+    {
+      character_id: "judge_smith",
+      role: "judge",
+      posture: "seated",
+      emotion: "curious",
+      text: "Wait a minute. You're talking about an offer of proof that you intend to make sometime in the future, right?",
+      eye_target: "mr_martinez",
+      pause_before: 0.7,
+    },
+    {
+      character_id: "mr_martinez",
+      role: "prosecutor",
+      posture: "standing",
+      emotion: "neutral",
+      text: "So one question was when you want me to do it.",
+      eye_target: "judge_smith",
+      pause_before: 0.5,
+    },
+    {
+      character_id: "judge_smith",
+      role: "judge",
+      posture: "seated",
+      emotion: "neutral",
+      text: "Right. Okay.",
+      eye_target: "mr_martinez",
+      pause_before: 0.5,
+    },
+    {
+      character_id: "mr_martinez",
+      role: "prosecutor",
+      posture: "standing",
+      emotion: "neutral",
+      text: "And if you want me to do it in your presence or just to the court reporter? I'd prefer to read it at this time, but I don't know when you want it.",
+      eye_target: "judge_smith",
+      pause_before: 0.5,
+    },
+    {
+      character_id: "judge_smith",
+      role: "judge",
+      posture: "seated",
+      emotion: "neutral",
+      text: "Well, you want to make it orally, right?",
+      eye_target: "mr_martinez",
+      pause_before: 0.6,
+    },
+    {
+      character_id: "mr_martinez",
+      role: "prosecutor",
+      posture: "standing",
+      emotion: "neutral",
+      text: "Yes.",
+      eye_target: "judge_smith",
+      pause_before: 0.3,
+    },
+    {
+      character_id: "judge_smith",
+      role: "judge",
+      posture: "seated",
+      emotion: "neutral",
+      text: "Let's do it right after lunch, how's that?",
+      eye_target: "mr_martinez",
+      pause_before: 0.5,
+    },
+    {
+      character_id: "mr_martinez",
+      role: "prosecutor",
+      posture: "standing",
+      emotion: "neutral",
+      text: "That's fine, Your Honor. I just needed to know when you wanted it.",
+      eye_target: "judge_smith",
+      pause_before: 0.5,
+    },
+    {
+      character_id: "judge_smith",
+      role: "judge",
+      posture: "seated",
+      emotion: "neutral",
+      text: "Let's do that. That's fine.",
+      eye_target: "mr_martinez",
+      pause_before: 0.5,
+    },
+    {
+      character_id: "mr_martinez",
+      role: "prosecutor",
+      posture: "standing",
+      emotion: "grateful",
+      text: "Okay. Thank you.",
+      eye_target: "judge_smith",
+      pause_before: 0.4,
+    },
+    {
+      character_id: "mr_martinez",
+      role: "prosecutor",
+      posture: "standing",
+      emotion: "neutral",
+      text: "Good morning, Mr. Arce.",
+      eye_target: "mr_arce",
+      pause_before: 0.5,
+    },
+    {
+      character_id: "mr_arce",
+      role: "witness",
+      posture: "seated",
+      emotion: "neutral",
+      text: "Good morning.",
+      eye_target: "mr_martinez",
+      pause_before: 0.5,
+    },
+    {
+      character_id: "mr_martinez",
+      role: "prosecutor",
+      posture: "standing",
+      emotion: "neutral",
+      text: "I'm going to try and stick to one mic and not wander.",
+      eye_target: "mr_arce",
+      pause_before: 0.5,
+    },
+    {
+      character_id: "mr_martinez",
+      role: "prosecutor",
+      posture: "standing",
+      emotion: "neutral",
+      text: "Let me ask you, can you please bring up Exhibit 541? I believe 541 has been admitted or is stipulated to as an exhibit, Your Honor. These are the Huppenthal findings. I was checking with counsel that she agreed it was stipulated to.",
+      eye_target: "judge_smith",
+      pause_before: 0.5,
+    },
+    {
+      character_id: "mr_cooper",
+      role: "defense",
+      posture: "standing",
+      emotion: "neutral",
+      text: "There's just a housekeeping matter that we would like to address, if it's all right with the Court.",
+      eye_target: "judge_smith",
+      pause_before: 0.5,
+    },
+    {
+      character_id: "mr_martinez",
+      role: "prosecutor",
+      posture: "standing",
+      emotion: "neutral",
+      text: "Can we deal --",
+      eye_target: "judge_smith",
+      pause_before: 0.5,
+    },
+    {
+      character_id: "judge_smith",
+      role: "judge",
+      posture: "seated",
+      emotion: "confused",
+      text: "I'm sorry, a what matter?",
+      eye_target: "mr_cooper",
+      pause_before: 0.5,
+    },
+    {
+      character_id: "mr_cooper",
+      role: "defense",
+      posture: "standing",
+      emotion: "neutral",
+      text: "A housekeeping matter with respect to a couple of exhibits. But we can address it later.",
+      eye_target: "judge_smith",
+      pause_before: 0.5,
+    },
+    {
+      character_id: "judge_smith",
+      role: "judge",
+      posture: "seated",
+      emotion: "neutral",
+      text: "All right. Fine. Let's do it later.",
+      eye_target: "mr_cooper",
+      pause_before: 0.5,
+    },
+    {
+      character_id: "mr_martinez",
+      role: "prosecutor",
+      posture: "standing",
+      emotion: "neutral",
+      text: "Okay. I just wanted to confirm on 541 --",
+      eye_target: "mr_cooper",
+      pause_before: 0.5,
+    },
+    {
+      character_id: "mr_cooper",
+      role: "defense",
+      posture: "standing",
+      emotion: "neutral",
+      text: "Yes.",
+      eye_target: "mr_martinez",
+      pause_before: 0.4,
+    },
+    {
+      character_id: "mr_quinn",
+      role: "prosecutor",
+      posture: "seated",
+      emotion: "neutral",
+      text: "Richard, it's admitted.",
+      eye_target: "mr_martinez",
+      pause_before: 0.4,
+    },
+    {
+      character_id: "mr_cooper",
+      role: "defense",
+      posture: "standing",
+      emotion: "neutral",
+      text: "Yes, Your Honor.",
+      eye_target: "judge_smith",
+      pause_before: 0.4,
+    },
+    {
+      character_id: "mr_martinez",
+      role: "prosecutor",
+      posture: "standing",
+      emotion: "neutral",
+      text: "Thank you.",
+      eye_target: "judge_smith",
+      pause_before: 0.4,
+    },
+    {
+      character_id: "mr_martinez",
+      role: "prosecutor",
+      posture: "standing",
+      emotion: "neutral",
+      text: "Mr. Arce, I just want to give you a minute to look through these three pages, so if you could just read Page 1, Page 2,",
+      eye_target: "mr_arce",
+      pause_before: 0.5,
+    },
+  ])}`;
+  
