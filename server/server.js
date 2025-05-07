@@ -3,7 +3,7 @@ require("dotenv").config();
 const { createClient } = require("@supabase/supabase-js");
 const saveToSupabase = require("./utils/saveToSupabase");
 const crypto = require("crypto");
-const Diff = require("diff"); // Ensure you have installed and required this
+
 const sendSlackMessage = require("./utils/sendToSlack.js"); // adjust path if needed
 
 const supabase = createClient(
@@ -17,14 +17,13 @@ const pdfParse = require("pdf-parse");
 const cors = require("cors");
 const fs = require("fs");
 const OpenAI = require("openai");
-const speakerVoiceMap = new Map();
+
 const ffmpeg = require("fluent-ffmpeg");
 const ffmpegPath = require("@ffmpeg-installer/ffmpeg").path;
 ffmpeg.setFfmpegPath(ffmpegPath);
 
 const os = require("os");
 const path = require("path");
-const { error, log } = require("console");
 
 // Enhance console logging with timestamps and iTerm-friendly format
 ["log", "info", "warn", "error"].forEach((method) => {
@@ -56,9 +55,7 @@ setupGoogleCredentialsFromBase64(); // 🧠 MUST be before using any GCP clients
 const textToSpeech = require("@google-cloud/text-to-speech");
 const client = new textToSpeech.TextToSpeechClient();
 const { Storage } = require("@google-cloud/storage");
-const { get } = require("http");
 const storage = new Storage();
-const GCS_BUCKET_NAME = process.env.GCS_BUCKET_NAME;
 
 const app = express();
 const port = 3001;
@@ -139,7 +136,8 @@ const phonemeToViseme = {
 // const MAX_CHUNKS = 518;
 // const MAX_CHUNKS = 44;
 const MAX_CHUNKS = 10;
-const DEV_MAX_CHUNKS = 44; // For local testing
+const DEV_MAX_CHUNKS = Infinity; // For local testing
+// const DEV_MAX_CHUNKS = 44; // For local testing
 const textChunkSize = 7000;
 
 function splitBySpeakerAndLength(text, maxChars = 7000) {
