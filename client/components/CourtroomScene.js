@@ -58,7 +58,8 @@ export default function CourtroomScene({
     const index = lines.findIndex((line) => line.line_id === endLineId);
     return index === -1 ? lines.length : index;
   }, [endLineId, lines]);
-
+  // console.log("lines");
+  // console.log(lines);
   const cameraTargetRef = useRef(new THREE.Object3D());
 
   const [currentIndex, setCurrentIndex] = useState(-1);
@@ -68,7 +69,7 @@ export default function CourtroomScene({
 
   const [showDefaultClerk, setShowDefaultClerk] = useState(true);
   const [showDefaultJudge, setShowDefaultJudge] = useState(false);
-  const [showJury, setShowJury] = useState(false);
+  const [showJury, setShowJury] = useState(true);
 
   const aliasMap = useMemo(() => {
     const map = {
@@ -77,7 +78,8 @@ export default function CourtroomScene({
       defense: "defense1",
       jury: "jury-2",
     };
-
+    console.log("lines");
+    console.log(lines);
     // Collect all audience IDs
     const audienceIds = [];
     [5, 8, 11, 14].forEach((z) => {
@@ -378,7 +380,7 @@ export default function CourtroomScene({
         formData.append("sceneId", sceneId);
         formData.append("folderName", folderName);
         try {
-          await fetch("http://localhost:3001/convert", {
+          fetch("http://localhost:3001/convert", {
             method: "POST",
             body: formData,
           });
@@ -723,45 +725,55 @@ export default function CourtroomScene({
       position: [0, 2, -18],
       rotation: [0, 0, 0],
     },
-    default_judge_sitting_at_judge_bench: {
-      position: [0, 2, -18],
-      rotation: [0, Math.PI, 0],
-    },
+    // default_judge_sitting_at_judge_bench: {
+    //   position: [0, 2, -18],
+    //   rotation: [0, Math.PI, 0],
+    // },
     witness_at_witness_stand: {
       position: [-10, 1.1, -15],
-      rotation: [0, Math.PI, 0],
+      rotation: [0, 0, 0],
     },
     stenographer_station: {
       position: [-17.5, 0, -8],
-      rotation: [0, -Math.PI / 2, 0],
+      rotation: [0, Math.PI / 2, 0],
     },
     prosecutor_table_right: {
       position: [-3.5, -0.05, -0.5],
-      rotation: [0, 0, 0],
+      rotation: [0, Math.PI, 0],
     },
     prosecutor_table_left: {
       position: [-6.5, -0.05, -0.5],
-      rotation: [0, 0, 0],
+      rotation: [0, Math.PI, 0],
     },
     defense_table_right: {
       position: [6.5, -0.05, -0.5],
-      rotation: [0, 0, 0],
+      rotation: [0, Math.PI, 0],
     },
-    defense_table_left: { position: [3.5, -0.05, -0.5], rotation: [0, 0, 0] },
+    defense_table_left: {
+      position: [3.5, -0.05, -0.5],
+      rotation: [0, Math.PI, 0],
+    },
     prosecutor_at_witness_stand: {
       position: [-10.5, -0.05, -8.5],
-      rotation: [0, Math.PI / 1.2, 0],
+      rotation: [0, -Math.PI / 1.2, 0],
     },
     defense_lawyer_at_witness_stand: {
       position: [-7.5, -0.05, -8.5],
-      rotation: [0, Math.PI / 1.2, 0],
+      rotation: [0, -Math.PI / 1.2, 0],
     },
-    clerk_box: { position: [10, 1, -15], rotation: [0, 0, 0] },
-    default_clerk_box: { position: [10, 1, -15], rotation: [0, Math.PI, 0] },
+    clerk_box: { position: [10, 1, -15], rotation: [0, Math.PI, 0] },
+    default_clerk_box: { position: [10, 1, -15], rotation: [0, 0, 0] },
+    outside: { position: [0, 1, 20], rotation: [0, 0, 0] },
   };
 
-  const getLocationPose = (key) =>
-    zoneMap[key] || { position: [0, 0, 0], rotation: [0, 0, 0] };
+  const getLocationPose = (key) => {
+    // console.log(`🗺️ Looking up location pose for ${key}`);
+    if (zoneMap[key]) {
+      return zoneMap[key];
+    } else {
+      console.log(`❗ No location pose found for ${key}`);
+    }
+  };
 
   // Build mapping of character id to their specified style.
   const characterStyleMapping = useMemo(() => {
@@ -1014,7 +1026,7 @@ export default function CourtroomScene({
 
                   return Object.entries(zoneOccupancy).map(
                     ([zone, characterId]) => {
-                      if (!characterId) return null;
+                      if (!characterId) return <React.Fragment key={zone} />;
 
                       // Special handling for the judge.
                       if (characterId === "judge") {
@@ -1026,7 +1038,7 @@ export default function CourtroomScene({
                               registerCharacter={registerCharacter}
                               lookTargetRef={lookTargetRef}
                               judgeStyle={getStyleForCharacter(
-                                "thecourt",
+                                "court",
                                 "judge"
                               )}
                               endIndex={endIndex}
@@ -1052,9 +1064,7 @@ export default function CourtroomScene({
                             <Character
                               key="judge"
                               {...getLocationPose(
-                                showDefaultJudge
-                                  ? "default_judge_sitting_at_judge_bench"
-                                  : "judge_sitting_at_judge_bench"
+                                "judge_sitting_at_judge_bench"
                               )}
                               onReady={(headRef) =>
                                 registerCharacter("judge", headRef, "judge")
@@ -1177,9 +1187,9 @@ export default function CourtroomScene({
                     {[...Array(6)].map((_, i) => (
                       <Character
                         key={`jury-${i}`}
-                        {...getLocationPose("jury_box")}
+                        // {...getLocationPose("jury_box")}
                         position={[18, 0, -13 + i * 1.3]}
-                        rotation={[0, Math.PI / 2, 0]}
+                        rotation={[0, -Math.PI / 2, 0]}
                         onReady={(headRef) =>
                           registerCharacter(
                             `jury-${i}`,
@@ -1236,7 +1246,7 @@ export default function CourtroomScene({
                   <Character
                     key={`audience-${x}-${z}`}
                     position={[x, 0, z]}
-                    rotation={[0, 0, 0]}
+                    rotation={[0, Math.PI, 0]}
                     onReady={(headRef) =>
                       registerCharacter(
                         `audience-${x}-${z}`,
@@ -1404,7 +1414,7 @@ function JudgeIntroAnimation({
           formData.append("folderName", folderName);
 
           try {
-            await fetch("http://localhost:3001/convert", {
+            fetch("http://localhost:3001/convert", {
               method: "POST",
               body: formData,
             });

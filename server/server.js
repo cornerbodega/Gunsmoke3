@@ -137,8 +137,9 @@ const phonemeToViseme = {
 };
 
 // const MAX_CHUNKS = 518;
-const MAX_CHUNKS = 44;
-
+// const MAX_CHUNKS = 44;
+const MAX_CHUNKS = 10;
+const DEV_MAX_CHUNKS = 44; // For local testing
 const textChunkSize = 7000;
 
 function splitBySpeakerAndLength(text, maxChars = 7000) {
@@ -212,98 +213,78 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
     const dataBuffer = fs.readFileSync(filePath);
     const parsed = await pdfParse(dataBuffer);
     const docMetadata = await analyzeRawDocument(parsed.text);
-
     fs.unlinkSync(filePath);
+
     console.log("📄 PDF parsed successfully");
     sendSlackMessage(
-      `📥 PDF Parsed Successfully.`,
+      `📄 PDF Parsed Successfully.`,
       "success",
       "script-creation-logs"
     );
-    console.log(`parsed.text:`, parsed.text);
 
     const chunks = splitBySpeakerAndLength(parsed.text, textChunkSize);
-    const limit = Math.min(MAX_CHUNKS, chunks.length);
-    console.log(`🔢 Processing ${limit} of ${chunks.length} chunks`);
+    const speakerMap = await buildSpeakerMap(chunks);
 
-    // 🔍 Character detection
-    const speakerMap = new Map();
-    for (let i = 0; i < limit; i++) {
-      const detected = await extractCharactersFromChunk(chunks[i], speakerMap);
-      for (const char of detected) {
-        if (!speakerMap.has(char.id)) {
-          speakerMap.set(char.id, {
-            name: char.name,
-            speaker_label: char.speaker_label,
-            role: char.role,
-          });
-        }
-      }
-    }
-
-    speakerMap.set("clerk", {
-      name: "Clerk",
-      speaker_label: "Clerk",
-      role: "clerk",
-      voice: "en-US-Wavenet-C",
-    });
-    speakerMap.set("audience", {
-      name: "Audience",
-      speaker_label: "Audience",
-      role: "audience",
-      voice: "en-US-Wavenet-C",
-    });
-
-    console.log("👥 Final Speaker Map:", Object.fromEntries(speakerMap));
-    sendSlackMessage(
-      `👥 Final Speaker Map: ${JSON.stringify(Object.fromEntries(speakerMap))}`,
-      "info",
-      "script-creation-logs"
-    );
-
-    // 🧼 Process chunks into structured lines
     const allLines = [];
     const lineHistory = [];
     let lineCounter = 1;
 
-    for (let i = 0; i < limit; i++) {
-      console.log(`🧼 Cleaning chunk ${i + 1} of ${chunks.length}`);
+    let processedChunks = 0;
+
+    for (let start = 0; start < chunks.length; start += MAX_CHUNKS) {
+      if (processedChunks >= DEV_MAX_CHUNKS) break;
+
+      const end = Math.min(
+        start + MAX_CHUNKS,
+        chunks.length,
+        start + DEV_MAX_CHUNKS - processedChunks
+      );
+      const chunkBatch = chunks.slice(start, end);
+
+      console.log(`🧼 Processing chunk batch ${start + 1} to ${end}`);
       sendSlackMessage(
-        `🧼 Cleaning chunk ${i + 1} of ${
-          chunks.length
-        } (up to Max Chunks = ${MAX_CHUNKS})`,
+        `🧼 Processing chunk batch ${start + 1} to ${end}`,
         "info",
         "script-creation-logs"
       );
 
-      const structuredLines = await processChunk(
-        chunks[i],
-        speakerMap,
-        lineHistory
+      const batchLines = await processChunkBatch(
+        chunkBatch,
+        lineHistory,
+        lineCounter
       );
 
-      for (const lineObj of structuredLines) {
-        // Assign voice
-        lineObj.voice = assignVoiceForSpeaker(lineObj.character_id);
-
-        allLines.push({ line_id: lineCounter, line_obj: lineObj });
-
-        // Update line history (for context continuity)
-        lineHistory.push({
-          speaker:
-            speakerMap.get(lineObj.character_id)?.name || lineObj.character_id,
-          text: lineObj.text,
-        });
-        if (lineHistory.length > 15) lineHistory.shift();
-
+      for (const line of batchLines) {
         await saveToSupabase("gs3_lines", {
           scene_id: sceneId,
-          line_id: lineCounter,
-          line_obj: lineObj,
+          line_id: line.line_id,
+          line_obj: line.line_obj,
         });
-
+        allLines.push(line);
         lineCounter++;
       }
+
+      // After lines are saved
+      await generateAudioAndVisemes(
+        sceneId,
+        lineCounter - batchLines.length,
+        lineCounter
+      );
+      await generateCharacterStyles(
+        sceneId,
+        lineCounter - batchLines.length,
+        lineCounter
+      );
+      await assignZones(sceneId, lineCounter - batchLines.length, lineCounter);
+
+      processedChunks += chunkBatch.length;
+
+      // ✅ Emit scene ID after first chunk batch is processed and saved
+      // if (start === 0) {
+      console.log(`🔗 Sending scene ID to clients: ${sceneId}`);
+
+      sendToClients({ type: "scene_id", message: sceneId });
+      // }
     }
 
     sendSlackMessage(
@@ -311,9 +292,10 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
       "success",
       "script-creation-logs"
     );
-    await generateAudioAndVisemes(sceneId);
-    await generateCharacterStyles(sceneId);
-    await assignZones(sceneId);
+
+    // await generateAudioAndVisemes(sceneId);
+    // await generateCharacterStyles(sceneId);
+    // await assignZones(sceneId);
 
     const sceneMetadata = {
       scene_id: sceneId,
@@ -330,6 +312,7 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
     };
 
     await saveToSupabase("gs3_scenes", sceneMetadata);
+
     sendSlackMessage(
       `📄 Scene metadata saved for ${sceneId}`,
       "success",
@@ -337,24 +320,102 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
     );
 
     res.json({
-      message: "✅ Transcript processed",
+      message: "✅ Full transcript processed",
       chunkCount: chunks.length,
-      processedChunkCount: limit,
+      processedChunkCount: allLines.length,
       numpages: parsed.numpages,
       info: parsed.info,
       characters: Array.from(speakerMap.values()),
-      // cleanedChunks: cleane      // transcript:
       lines: allLines.map((l) => l.line_obj),
     });
+
+    // ────────────── INTERNAL SUBFUNCTIONS ──────────────
+
+    async function buildSpeakerMap(chunks) {
+      const map = new Map();
+
+      for (let i = 0; i < Math.min(chunks.length, MAX_CHUNKS); i++) {
+        const detected = await extractCharactersFromChunk(chunks[i], map);
+        for (const char of detected) {
+          if (!map.has(char.id)) {
+            map.set(char.id, {
+              name: char.name,
+              speaker_label: char.speaker_label,
+              role: char.role,
+            });
+          }
+        }
+      }
+
+      map.set("clerk", {
+        name: "Clerk",
+        speaker_label: "Clerk",
+        role: "clerk",
+        voice: "en-US-Wavenet-C",
+      });
+
+      // map.set("audience", {
+      //   name: "Audience",
+      //   speaker_label: "Audience",
+      //   role: "audience",
+      //   voice: "en-US-Wavenet-C",
+      // });
+
+      console.log("👥 Final Speaker Map:", Object.fromEntries(map));
+      sendSlackMessage(
+        `👥 Final Speaker Map: ${JSON.stringify(Object.fromEntries(map))}`,
+        "info",
+        "script-creation-logs"
+      );
+
+      return map;
+    }
+
+    async function processChunkBatch(chunks, lineHistory, startingLineId) {
+      const batchLines = [];
+      let lineId = startingLineId;
+
+      for (let i = 0; i < chunks.length; i++) {
+        const structuredLines = await processChunk(
+          chunks[i],
+          speakerMap,
+          lineHistory
+        );
+
+        for (const lineObj of structuredLines) {
+          lineObj.voice = assignVoiceForSpeaker(lineObj.character_id);
+
+          batchLines.push({ line_id: lineId, line_obj: lineObj });
+
+          lineHistory.push({
+            speaker:
+              speakerMap.get(lineObj.character_id)?.name ||
+              lineObj.character_id,
+            text: lineObj.text,
+          });
+
+          if (lineHistory.length > 15) lineHistory.shift();
+
+          lineId++;
+        }
+      }
+
+      return batchLines;
+    }
   } catch (err) {
     console.error("❌ PDF parsing error:", err);
     res.status(500).json({ error: "Failed to parse PDF" });
   }
 });
 
-async function assignZones(sceneId) {
+async function assignZones(sceneId, startLineId = 0, endLineId = Infinity) {
   try {
-    const rows = await getAllLinesForScene(sceneId);
+    const rows = (await getAllLinesForScene(sceneId)).filter(
+      (r) =>
+        r.line_id >= startLineId &&
+        r.line_id < endLineId &&
+        (!r.line_obj.zone || !r.line_obj.camera)
+    );
     const CONTEXT_WINDOW = 15;
     const priorLines = [];
 
@@ -367,7 +428,7 @@ async function assignZones(sceneId) {
         prosecutor: "prosecutor_table_left",
         clerk: "clerk_box",
       };
-      return zoneMap[role] || "wide_establishing";
+      return zoneMap[role] || "outside";
     }
 
     // 🎥 Generate cinematic camera angle based on role, text, and recent shots
@@ -590,11 +651,20 @@ function alignVisemesWithTimings(text, timepoints, cmuDict) {
   };
 }
 
-async function generateAudioAndVisemes(sceneId) {
+async function generateAudioAndVisemes(
+  sceneId,
+  startLineId = 0,
+  endLineId = Infinity
+) {
   try {
     //todo: delete lines with no text
     // Fetch all lines using pagination
-    const rows = await getAllLinesForScene(sceneId);
+    const rows = (await getAllLinesForScene(sceneId)).filter(
+      (r) =>
+        r.line_id >= startLineId &&
+        r.line_id < endLineId &&
+        !r.line_obj?.audio_url // ❗ prevents repeat
+    );
     console.log(
       `📦 generateAudioAndVisemes Fetched ${rows.length} rows for scene ${sceneId}`
     );
@@ -765,6 +835,400 @@ async function processChunk(chunkText, speakerMap, previousLines) {
 }
 
 async function cleanText(chunkText, speakerMap, previousLines) {
+  const sampleInput = `
+
+(Proceedings commenced at 9:06 a.m. as follows:)
+THE COURT: Good morning. Be seated.
+MR. MARTINEZ: Good morning, Your Honor.
+THE COURT: We are with the direct of Mr. Arce, right,
+is going to continue?
+MR. MARTINEZ: Yes, Your Honor. I have a procedural
+question I would like to address with the Court at the
+beginning.
+THE COURT: Go ahead.
+MR. MARTINEZ: With respect to the pro offer, Your
+Honor, I have two questions --
+THE COURT: Wait a minute. You're talking about an
+offer of proof that you intend to make sometime in the future,
+right?
+MR. MARTINEZ: So one question was when you want me to
+do it.
+THE COURT: Right. Okay.
+MR. MARTINEZ: And if you want me to do it in your
+presence or just to the court reporter? I'd prefer to read it
+at this time, but I don't know when you want it.
+THE COURT: Well, you want to make it orally, right?
+MR. MARTINEZ: Yes.
+THE COURT: Let's do it right after lunch, how's that?
+MR. MARTINEZ: That's fine, Your Honor. I just needed
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+UNITED STATES DISTRICT COURT
+6
+to know when you wanted it.
+THE COURT: Let's do that. That's fine.
+MR. MARTINEZ: Okay. Thank you.
+SEAN ARCE, WITNESS, PREVIOUSLY SWORN
+DIRECT EXAMINATION (RESUMED)
+BY MR. MARTINEZ:
+Q. Good morning, Mr. Arce.
+A. Good morning.
+Q. I'm going to try and stick to one mic and not wander.
+MR. MARTINEZ: Let me ask you, can you please bring up
+Exhibit 541? I believe 541 has been admitted or is stipulated
+to as an exhibit, Your Honor. These are the Huppenthal
+findings. I was checking with counsel that she agreed it was
+stipulated to.
+MS. COOPER: There's just a housekeeping matter that
+we would like to address, if it's all right with the Court.
+MR. MARTINEZ: Can we deal --
+THE COURT: I'm sorry, a what matter?
+MS. COOPER: A housekeeping matter with respect to a
+couple of exhibits. But we can address it later.
+THE COURT: All right. Fine. Let's do it later.
+MR. MARTINEZ: Okay. I just wanted to confirm on
+541 --
+MS. COOPER: Yes.
+MR. MARTINEZ: -- it's an admitted exhibit.
+1
+2
+3
+4
+5
+6
+7
+8
+9
+10
+11
+12
+13
+14
+15
+16
+17
+18
+19
+20
+21
+22
+23
+24
+25
+UNITED STATES DISTRICT COURT
+7
+MR. QUINN: Richard, it's admitted.
+MS. COOPER: Yes, Your Honor.
+MR. MARTINEZ: Thank you.
+BY MR. MARTINEZ:
+Q. Mr. Arce, I just want to give you a minute to look through
+these three pages, so if you could just read Page 1, Page 2,`;
+
+  const sampleOutput = `${JSON.stringify([
+    {
+      character_id: "court",
+      role: "judge",
+      posture: "seated",
+      emotion: "neutral",
+      text: "Good morning. Be seated.",
+      eye_target: "audience",
+      pause_before: 0.5,
+    },
+    {
+      character_id: "martinez",
+      role: "prosecutor",
+      posture: "standing",
+      emotion: "neutral",
+      text: "Good morning, Your Honor.",
+      eye_target: "court",
+      pause_before: 0.5,
+    },
+    {
+      character_id: "court",
+      role: "judge",
+      posture: "seated",
+      emotion: "neutral",
+      text: "We are with the direct of Mr. Arce, right, is going to continue?",
+      eye_target: "martinez",
+      pause_before: 1,
+    },
+    {
+      character_id: "martinez",
+      role: "prosecutor",
+      posture: "standing",
+      emotion: "neutral",
+      text: "Yes, Your Honor. I have a procedural question I would like to address with the Court at the beginning.",
+      eye_target: "court",
+      pause_before: 0.5,
+    },
+    {
+      character_id: "court",
+      role: "judge",
+      posture: "seated",
+      emotion: "neutral",
+      text: "Go ahead.",
+      eye_target: "martinez",
+      pause_before: 0.5,
+    },
+    {
+      character_id: "martinez",
+      role: "prosecutor",
+      posture: "standing",
+      emotion: "neutral",
+      text: "With respect to the pro offer, Your Honor, I have two questions --",
+      eye_target: "court",
+      pause_before: 0.5,
+    },
+    {
+      character_id: "court",
+      role: "judge",
+      posture: "seated",
+      emotion: "curious",
+      text: "Wait a minute. You're talking about an offer of proof that you intend to make sometime in the future, right?",
+      eye_target: "martinez",
+      pause_before: 0.7,
+    },
+    {
+      character_id: "martinez",
+      role: "prosecutor",
+      posture: "standing",
+      emotion: "neutral",
+      text: "So one question was when you want me to do it.",
+      eye_target: "court",
+      pause_before: 0.5,
+    },
+    {
+      character_id: "court",
+      role: "judge",
+      posture: "seated",
+      emotion: "neutral",
+      text: "Right. Okay.",
+      eye_target: "martinez",
+      pause_before: 0.5,
+    },
+    {
+      character_id: "martinez",
+      role: "prosecutor",
+      posture: "standing",
+      emotion: "neutral",
+      text: "And if you want me to do it in your presence or just to the court reporter? I'd prefer to read it at this time, but I don't know when you want it.",
+      eye_target: "court",
+      pause_before: 0.5,
+    },
+    {
+      character_id: "court",
+      role: "judge",
+      posture: "seated",
+      emotion: "neutral",
+      text: "Well, you want to make it orally, right?",
+      eye_target: "martinez",
+      pause_before: 0.6,
+    },
+    {
+      character_id: "martinez",
+      role: "prosecutor",
+      posture: "standing",
+      emotion: "neutral",
+      text: "Yes.",
+      eye_target: "court",
+      pause_before: 0.3,
+    },
+    {
+      character_id: "court",
+      role: "judge",
+      posture: "seated",
+      emotion: "neutral",
+      text: "Let's do it right after lunch, how's that?",
+      eye_target: "martinez",
+      pause_before: 0.5,
+    },
+    {
+      character_id: "martinez",
+      role: "prosecutor",
+      posture: "standing",
+      emotion: "neutral",
+      text: "That's fine, Your Honor. I just needed to know when you wanted it.",
+      eye_target: "court",
+      pause_before: 0.5,
+    },
+    {
+      character_id: "court",
+      role: "judge",
+      posture: "seated",
+      emotion: "neutral",
+      text: "Let's do that. That's fine.",
+      eye_target: "martinez",
+      pause_before: 0.5,
+    },
+    {
+      character_id: "martinez",
+      role: "prosecutor",
+      posture: "standing",
+      emotion: "grateful",
+      text: "Okay. Thank you.",
+      eye_target: "court",
+      pause_before: 0.4,
+    },
+    {
+      character_id: "martinez",
+      role: "prosecutor",
+      posture: "standing",
+      emotion: "neutral",
+      text: "Good morning, Mr. Arce.",
+      eye_target: "arce",
+      pause_before: 0.5,
+    },
+    {
+      character_id: "arce",
+      role: "witness",
+      posture: "seated",
+      emotion: "neutral",
+      text: "Good morning.",
+      eye_target: "martinez",
+      pause_before: 0.5,
+    },
+    {
+      character_id: "martinez",
+      role: "prosecutor",
+      posture: "standing",
+      emotion: "neutral",
+      text: "I'm going to try and stick to one mic and not wander.",
+      eye_target: "arce",
+      pause_before: 0.5,
+    },
+    {
+      character_id: "martinez",
+      role: "prosecutor",
+      posture: "standing",
+      emotion: "neutral",
+      text: "Let me ask you, can you please bring up Exhibit 541? I believe 541 has been admitted or is stipulated to as an exhibit, Your Honor. These are the Huppenthal findings. I was checking with counsel that she agreed it was stipulated to.",
+      eye_target: "court",
+      pause_before: 0.5,
+    },
+    {
+      character_id: "cooper",
+      role: "defense",
+      posture: "standing",
+      emotion: "neutral",
+      text: "There's just a housekeeping matter that we would like to address, if it's all right with the Court.",
+      eye_target: "court",
+      pause_before: 0.5,
+    },
+    {
+      character_id: "martinez",
+      role: "prosecutor",
+      posture: "standing",
+      emotion: "neutral",
+      text: "Can we deal --",
+      eye_target: "court",
+      pause_before: 0.5,
+    },
+    {
+      character_id: "court",
+      role: "judge",
+      posture: "seated",
+      emotion: "confused",
+      text: "I'm sorry, a what matter?",
+      eye_target: "cooper",
+      pause_before: 0.5,
+    },
+    {
+      character_id: "cooper",
+      role: "defense",
+      posture: "standing",
+      emotion: "neutral",
+      text: "A housekeeping matter with respect to a couple of exhibits. But we can address it later.",
+      eye_target: "court",
+      pause_before: 0.5,
+    },
+    {
+      character_id: "court",
+      role: "judge",
+      posture: "seated",
+      emotion: "neutral",
+      text: "All right. Fine. Let's do it later.",
+      eye_target: "cooper",
+      pause_before: 0.5,
+    },
+    {
+      character_id: "martinez",
+      role: "prosecutor",
+      posture: "standing",
+      emotion: "neutral",
+      text: "Okay. I just wanted to confirm on 541 --",
+      eye_target: "cooper",
+      pause_before: 0.5,
+    },
+    {
+      character_id: "cooper",
+      role: "defense",
+      posture: "standing",
+      emotion: "neutral",
+      text: "Yes.",
+      eye_target: "martinez",
+      pause_before: 0.4,
+    },
+    {
+      character_id: "quinn",
+      role: "prosecutor",
+      posture: "seated",
+      emotion: "neutral",
+      text: "Richard, it's admitted.",
+      eye_target: "martinez",
+      pause_before: 0.4,
+    },
+    {
+      character_id: "cooper",
+      role: "defense",
+      posture: "standing",
+      emotion: "neutral",
+      text: "Yes, Your Honor.",
+      eye_target: "court",
+      pause_before: 0.4,
+    },
+    {
+      character_id: "martinez",
+      role: "prosecutor",
+      posture: "standing",
+      emotion: "neutral",
+      text: "Thank you.",
+      eye_target: "court",
+      pause_before: 0.4,
+    },
+    {
+      character_id: "martinez",
+      role: "prosecutor",
+      posture: "standing",
+      emotion: "neutral",
+      text: "Mr. Arce, I just want to give you a minute to look through these three pages, so if you could just read Page 1, Page 2,",
+      eye_target: "arce",
+      pause_before: 0.5,
+    },
+  ])}`;
+
   const CONTEXT_WINDOW = 15;
   try {
     let contextPrompt = `You are cleaning and formatting courtroom transcript lines into structured JSON. Each line of dialog should include:
@@ -776,7 +1240,13 @@ async function cleanText(chunkText, speakerMap, previousLines) {
 - eye_target (character_id of the person being spoken to, not the speaker. Pick from speakermap. Use "audience" for general audience or unknowns),
 - pause_before (number, seconds — cinematic timing),
 
-Output an array of JSON objects — one per line. No explanations.`;
+If something is not dialog, like a description of events or other metadata, ignore it.
+
+USE COMMON SENSE TO ASSIGN THE SPEAKER. For example, people don't tell themselves Good morning. They say it to someone else. Use the context of the dialog to infer who is speaking and who is being spoken to.
+
+Output an array of JSON objects — one per line. No explanations.
+
+`;
 
     if (previousLines.length) {
       const priorContext = previousLines
@@ -798,20 +1268,7 @@ Output an array of JSON objects — one per line. No explanations.`;
     )}`;
 
     const prompt = `
-Please process the following transcript into JSON. Each dialog line must return:
-- character_id
-- role
-- text
-- posture
-- emotion
-- eye_target
-- pause_before
-
-
-Transcript:
 ${chunkText}
-
-⚠️ Do not explain. Return an array of JSON objects only.
     `;
 
     console.log(`📤 Sending chunk to OpenAI:\n`, contextPrompt);
@@ -821,6 +1278,11 @@ ${chunkText}
       model: "gpt-4o-mini",
       messages: [
         { role: "system", content: contextPrompt },
+        {
+          role: "user",
+          content: `${sampleInput}`,
+        },
+        { role: "assistant", content: `${sampleOutput}` },
         { role: "user", content: prompt },
       ],
     });
@@ -830,72 +1292,12 @@ ${chunkText}
       .replace(/^```(?:json)?\s*/i, "")
       .replace(/```$/, "");
     const parsedLines = JSON.parse(jsonText);
-    console.log("📥 OpenAI response (parsed):", parsedLines);
+    console.log("📥 OpenAI response (parsed):", JSON.stringify(parsedLines));
     return parsedLines; // Return structured lines, not plain text
   } catch (error) {
     console.error("❌ GPT error in cleanText:", error.message || error);
     throw new Error("Failed to clean transcript chunk");
   }
-}
-
-/**
- * Uses a word-level diff to remove overlapping text between two chunks.
- * If a common overlap is detected, it removes the duplicate from the next chunk.
- *
- * @param {string} leftChunk - The previous transcript chunk.
- * @param {string} rightChunk - The next transcript chunk.
- * @param {number} maxOverlapChars - Number of characters to consider as overlap.
- * @returns {string} - The merged transcript string.
- */
-function cleanString(str) {
-  // Remove extra whitespace, newlines, and optionally punctuation differences
-  return str.replace(/\s+/g, " ").trim().toLowerCase();
-}
-
-function removeOverlapUsingDiff(leftChunk, rightChunk, maxOverlapChars = 100) {
-  let maxOverlap = 0;
-  const leftClean = cleanString(leftChunk);
-  const rightClean = cleanString(rightChunk);
-
-  const searchLength = Math.min(
-    leftClean.length,
-    rightClean.length,
-    maxOverlapChars
-  );
-  for (let i = searchLength; i > 0; i--) {
-    if (leftClean.slice(-i) === rightClean.slice(0, i)) {
-      maxOverlap = i;
-      break;
-    }
-  }
-  // Remove the overlapping portion from the original right chunk
-  return leftChunk + "\n\n" + rightChunk.slice(maxOverlap);
-}
-
-/**
- * Iteratively merges an array of transcript chunks using the local
- * overlap removal function.
- *
- * @param {string[]} chunks - Array of transcript chunks.
- * @param {number} overlapChars - Number of characters to consider for overlap.
- * @returns {Promise<string>} - The final merged transcript.
- */
-async function iterativeMergeChunks(chunks, overlapChars = 1000) {
-  if (!chunks.length) return "";
-  let mergedTranscript = chunks[0];
-  for (let i = 1; i < chunks.length; i++) {
-    mergedTranscript = removeOverlapUsingDiff(
-      mergedTranscript,
-      chunks[i],
-      overlapChars
-    );
-    console.log(
-      `✅ Merged chunk ${i - 1} + ${i} (transcript length: ${
-        mergedTranscript.length
-      })`
-    );
-  }
-  return mergedTranscript;
 }
 
 function hashString(str) {
@@ -917,7 +1319,7 @@ function assignVoiceForSpeaker(speaker) {
     "en-US-Wavenet-G",
     "en-US-Wavenet-H",
   ];
-  // use ai for this! also keep a list of voices used
+
   const index = Math.abs(hashString(speaker)) % availableVoices.length;
   return availableVoices[index];
 }
@@ -965,16 +1367,28 @@ async function analyzeRawDocument(text) {
   }
 }
 
-async function generateCharacterStyles(sceneId) {
+async function generateCharacterStyles(
+  sceneId,
+  startLineId = 0,
+  endLineId = Infinity
+) {
   try {
     // Fetch all lines using pagination
-    const rows = await getAllLinesForScene(sceneId);
+    const rows = (await getAllLinesForScene(sceneId)).filter(
+      (r) => r.line_id >= startLineId && r.line_id < endLineId
+    );
 
     // Step 1: Build set of unique character_ids
     const characterIds = new Set();
     for (const row of rows) {
-      const characterId = row.line_obj.character_id;
-      if (characterId) characterIds.add(characterId);
+      const { line_obj } = row;
+      const style = line_obj.style || {};
+      const hasValidStyle =
+        style.hair_color && style.skin_color && style.shirt_color;
+
+      if (!hasValidStyle && line_obj.character_id) {
+        characterIds.add(line_obj.character_id);
+      }
     }
 
     // Step 2: Generate all styles in memory
@@ -1065,23 +1479,6 @@ Character ID: ${character_id}
   }
 }
 
-async function fetchWithRetry(url, options = {}, retries = 5) {
-  for (let i = 0; i <= retries; i++) {
-    try {
-      const res = await fetch(url, options);
-      if (!res.ok) throw new Error(`Upstream returned ${res.status}`);
-      return res;
-    } catch (err) {
-      if (i === retries) throw err;
-      const delay = Math.pow(2, i) * 100;
-      console.warn(
-        `🔁 Retry ${i + 1}/${retries} after ${delay}ms due to:`,
-        err.message
-      );
-      await new Promise((r) => setTimeout(r, delay));
-    }
-  }
-}
 async function fetchWithRetry(url, options = {}, retries = 5) {
   for (let i = 0; i <= retries; i++) {
     try {
@@ -1555,6 +1952,49 @@ ${fullChunkText}
     highlight_line_ids: flatLines.map((l) => l.line_id),
     line_objs: flatLines.map((l) => l.line_obj),
   });
+});
+
+// SSE endpoint for streaming logs
+const clients = [];
+
+app.get("/logs", (req, res) => {
+  res.set({
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+    Connection: "keep-alive",
+  });
+  res.flushHeaders();
+
+  clients.push(res);
+
+  req.on("close", () => {
+    const i = clients.indexOf(res);
+    if (i !== -1) clients.splice(i, 1);
+  });
+});
+
+function sendToClients(data) {
+  let payload = "";
+
+  if (data.type === "scene_id") {
+    // Named event for scene ID
+    payload = `event: scene_id\n` + `data: ${JSON.stringify(data)}\n\n`;
+  } else {
+    // Generic log event
+    payload = `data: ${JSON.stringify(data)}\n\n`;
+  }
+
+  clients.forEach((res) => res.write(payload));
+}
+
+["log", "info", "warn", "error"].forEach((method) => {
+  const original = console[method];
+  console[method] = (...args) => {
+    const timestamp = new Date().toISOString();
+    const message = args.map(String).join(" ");
+    sendToClients({ type: method, message, timestamp });
+    original(`[${timestamp}]`, ...args);
+  };
 });
 
 app.listen(port, () => {

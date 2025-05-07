@@ -26,9 +26,8 @@ export default function Nameplate({
       ? role
       : role === id
       ? role
-      : `${isSpeaking ? "🔊 " : ""}${role || ""} (${id})`
-          .replace(/\d+/g, "")
-          .trim();
+      : // : `${isSpeaking ? "🔊 " : ""}${role || ""} (${id})`
+        `${id}${isSpeaking ? "🔊" : ""}`.replace(/\d+/g, "").trim();
 
   return (
     <group ref={groupRef} position={position}>

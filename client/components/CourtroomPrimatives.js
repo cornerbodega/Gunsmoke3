@@ -119,7 +119,7 @@ export const JudgeBackWall = ({
   const panelCount = Math.floor(wallWidth / panelWidth);
   const usedWidth = panelCount * panelWidth;
   const paintingTexture = useLoader(TextureLoader, "/textures/painting.jpg");
-
+  const showPainting = false;
   return (
     <group position={position} rotation={rotation}>
       <Box
@@ -148,55 +148,61 @@ export const JudgeBackWall = ({
         args={[wallWidth, 0.5, 0.1]}
         color="#2e1a0e"
       />
-      <group position={[0, 0, 0]}>
-        {" "}
-        {/* move everything up by 2 units */}
-        {/* Painting */}
-        <mesh position={[0, 8, 0.4]}>
-          <planeGeometry args={[13, 9]} />
-          <meshStandardMaterial map={paintingTexture} />
-        </mesh>
-        {/* Picture Frame */}
-        <group position={[0, 8, 0.425]}>
-          {/* Top and Bottom Frame */}
-          <Box position={[0, 4.6, 0]} args={[13, 0.5, 0.1]} color="#2e1a0e" />
-          <Box position={[0, -4.6, 0]} args={[13, 0.5, 0.1]} color="#2e1a0e" />
+      {showPainting && (
+        <group position={[0, 2, 0]}>
+          {" "}
+          {/* move everything up by 2 units */}
+          {/* Painting */}
+          <mesh position={[0, 8, 0.4]}>
+            <planeGeometry args={[13, 9]} />
+            <meshStandardMaterial map={paintingTexture} />
+          </mesh>
+          {/* Picture Frame */}
+          <group position={[0, 8, 0.425]}>
+            {/* Top and Bottom Frame */}
+            <Box position={[0, 4.6, 0]} args={[13, 0.5, 0.1]} color="#2e1a0e" />
+            <Box
+              position={[0, -4.6, 0]}
+              args={[13, 0.5, 0.1]}
+              color="#2e1a0e"
+            />
 
-          {/* Left and Right Frame */}
-          <Box
-            position={[-6.75, 0, 0]}
-            args={[0.5, 8.75, 0.1]}
-            color="#2e1a0e"
-          />
-          <Box
-            position={[6.75, 0, 0]}
-            args={[0.5, 8.75, 0.1]}
-            color="#2e1a0e"
-          />
+            {/* Left and Right Frame */}
+            <Box
+              position={[-6.75, 0, 0]}
+              args={[0.5, 8.75, 0.1]}
+              color="#2e1a0e"
+            />
+            <Box
+              position={[6.75, 0, 0]}
+              args={[0.5, 8.75, 0.1]}
+              color="#2e1a0e"
+            />
 
-          {/* Decorative corner squares (enhanced) */}
-          <Box
-            position={[-6.75, 4.6, 0.06]}
-            args={[0.7, 0.7, 0.06]}
-            color="#3c1f0f"
-          />
-          <Box
-            position={[6.75, 4.6, 0.06]}
-            args={[0.7, 0.7, 0.06]}
-            color="#3c1f0f"
-          />
-          <Box
-            position={[-6.75, -4.6, 0.06]}
-            args={[0.7, 0.7, 0.06]}
-            color="#3c1f0f"
-          />
-          <Box
-            position={[6.75, -4.6, 0.06]}
-            args={[0.7, 0.7, 0.06]}
-            color="#3c1f0f"
-          />
+            {/* Decorative corner squares (enhanced) */}
+            <Box
+              position={[-6.75, 4.6, 0.06]}
+              args={[0.7, 0.7, 0.06]}
+              color="#3c1f0f"
+            />
+            <Box
+              position={[6.75, 4.6, 0.06]}
+              args={[0.7, 0.7, 0.06]}
+              color="#3c1f0f"
+            />
+            <Box
+              position={[-6.75, -4.6, 0.06]}
+              args={[0.7, 0.7, 0.06]}
+              color="#3c1f0f"
+            />
+            <Box
+              position={[6.75, -4.6, 0.06]}
+              args={[0.7, 0.7, 0.06]}
+              color="#3c1f0f"
+            />
+          </group>
         </group>
-      </group>
+      )}
     </group>
   );
 };
@@ -652,7 +658,7 @@ export const Character = forwardRef(function Character(
   const hipY = legHeight;
   const hipZ = sitting ? 0.4 : 0;
   const finalRotation = sitting
-    ? [rotation[0], rotation[1] + Math.PI, rotation[2]]
+    ? [rotation[0], rotation[1], rotation[2]]
     : rotation;
 
   const torsoCenterY = torsoHeight / 2;

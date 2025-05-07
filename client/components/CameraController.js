@@ -19,7 +19,7 @@ export default function CameraController({ activePreset }) {
         lookAt: new THREE.Vector3(0, 3, -9),
       },
       judge_closeup: {
-        position: new THREE.Vector3(0, 8, -10),
+        position: new THREE.Vector3(0, 4, -10),
         lookAt: new THREE.Vector3(0, 4, -18),
       },
       witness_closeup: {
