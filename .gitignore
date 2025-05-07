@@ -1,6 +1,6 @@
 server/node_modules/*
 client/node_modules*
-client/*next*
+client/.next*
 client/tmp*
 client/pdf-prep/*pdf
 client/pdf-prep/*txt
