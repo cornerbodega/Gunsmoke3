@@ -666,19 +666,23 @@ export default function CourtroomScene({
 
   // --- Continuously Update Targets (inside Canvas) ---
   function TargetUpdater({ introPlaying }) {
-    const frameCount = useRef(0);
-    useFrame(() => {
-      frameCount.current++;
-      if (frameCount.current % 3 !== 0) return; // Skip 2 of every 3 frames
+    const lastUpdateRef = useRef(0);
+    const judgePos = useRef(new THREE.Vector3());
+    const tempPos1 = useRef(new THREE.Vector3());
+    const tempPos2 = useRef(new THREE.Vector3());
+
+    useFrame(({ clock }) => {
+      const now = clock.getElapsedTime();
+      if (now - lastUpdateRef.current < 0.1) return;
+      lastUpdateRef.current = now;
 
       if (introPlaying) {
         const judge = resolvedCharacterRefs["judge"]?.headRef;
-        if (judge) {
-          const pos = new THREE.Vector3();
-          judge.getWorldPosition(pos);
-          pos.y += 0.25;
-          lookTargetRef.current.position.copy(pos);
-        }
+        if (!judge) return;
+
+        judge.getWorldPosition(judgePos.current);
+        judgePos.current.y += 0.25;
+        lookTargetRef.current.position.copy(judgePos.current);
         return;
       }
 
@@ -693,17 +697,17 @@ export default function CourtroomScene({
         resolvedCharacterRefs[targetId] || resolvedCharacterRefs["judge"];
 
       if (speakerObj?.headRef) {
-        const pos = new THREE.Vector3();
-        speakerObj.headRef.getWorldPosition(pos);
-        lookTargetRef.current.position.copy(pos);
+        speakerObj.headRef.getWorldPosition(tempPos1.current);
+        lookTargetRef.current.position.copy(tempPos1.current);
       }
+
       if (targetObj?.headRef) {
-        const pos2 = new THREE.Vector3();
-        targetObj.headRef.getWorldPosition(pos2);
-        pos2.y += 0.25;
-        speakerTargetRef.current.position.copy(pos2);
+        targetObj.headRef.getWorldPosition(tempPos2.current);
+        tempPos2.current.y += 0.25;
+        speakerTargetRef.current.position.copy(tempPos2.current);
       }
     });
+
     return null;
   }
 
