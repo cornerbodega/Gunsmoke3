@@ -1,8 +1,8 @@
 server/node_modules/*
-client/gunsmoke3/node_modules*
-client/gunsmoke3/*next*
-client/gunsmoke3/tmp
+client/node_modules*
+client/*next*
+client/tmp
 .env
 server/uploads/*
 server/videos/*
-client/gunsmoke3/tmp/*
+client/tmp/*

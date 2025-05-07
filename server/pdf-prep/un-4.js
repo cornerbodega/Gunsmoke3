@@ -94,8 +94,11 @@ async function splitAndAddToPdf(imageBuffer, pdfDoc, ocrResults, pageIndex) {
   }
 
   await expandPdfWithOcr(
-    "Day-01-Transcript-Depp-v-NGN-7-July-2020.pdf",
-    "Un-4-Day-01-Transcript-Depp-v-NGN-7-July-2020.pdf",
-    "Un-4-Day-01-OCR.txt"
+    // "Day-01-Transcript-Depp-v-NGN-7-July-2020.pdf",
+    // "Un-4-Day-01-Transcript-Depp-v-NGN-7-July-2020.pdf",
+    // "Un-4-Day-01-OCR.txt"
+    "Day-02-Transcript-Depp-v-NGN-8-July-2020.pdf",
+    "Un-4-Day-02-Transcript-Depp-v-NGN-8-July-2020.pdf",
+    "Un-4-Day-02-OCR.txt"
   );
 })();
