@@ -4,12 +4,10 @@ import path from "path";
 import FormData from "form-data";
 import axios from "axios";
 
-// Toggle between classic server and ML server
 const USE_ML_SERVER = false;
 const SERVER_PORT = USE_ML_SERVER ? 3002 : 3001;
 const SERVER_URL = `http://localhost:${SERVER_PORT}/upload`;
 
-// Disable built-in body parsing
 export const config = {
   api: {
     bodyParser: false,
@@ -27,7 +25,7 @@ export default async function handler(req, res) {
   const form = formidable({
     uploadDir,
     keepExtensions: true,
-    maxFileSize: 200 * 1024 * 1024, // ✅ 200MB
+    maxFileSize: 200 * 1024 * 1024,
     allowEmptyFiles: false,
     multiples: false,
   });
@@ -49,9 +47,16 @@ export default async function handler(req, res) {
       : file.originalFilename;
 
     try {
-      const fileStream = fs.createReadStream(filePath);
+      const fileBuffer = fs.readFileSync(filePath); // ✅ use buffer, not stream
       const formData = new FormData();
-      formData.append("pdf", fileStream, filename);
+      formData.append("pdf", fileBuffer, filename); // ✅ fix here
+
+      const percent = Array.isArray(fields.pdf_percent)
+        ? fields.pdf_percent[0]
+        : fields.pdf_percent || "100";
+      formData.append("pdf_percent", percent);
+
+      console.log("Parsed fields:", fields);
 
       const response = await axios.post(SERVER_URL, formData, {
         headers: {
@@ -61,7 +66,7 @@ export default async function handler(req, res) {
         maxBodyLength: Infinity,
       });
 
-      fs.unlinkSync(filePath); // ✅ Clean up
+      fs.unlinkSync(filePath); // ✅ clean up
 
       res.status(200).json(response.data);
     } catch (err) {

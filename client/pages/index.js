@@ -1,25 +1,125 @@
-// Link to courtroom
-
-// link to create scene from transcript
 import Link from "next/link";
 
 export default function Home() {
   return (
-    <div className="p-4 space-y-6">
-      <h1 className="text-2xl font-bold">Gunsmoke</h1>
-      <br></br>
+    <div
+      style={{
+        minHeight: "100vh",
+        background: "linear-gradient(to bottom, black, #111)",
+        color: "white",
+        display: "flex",
+        flexDirection: "column",
+        justifyContent: "center",
+        alignItems: "center",
+        padding: "2rem",
+        textAlign: "center",
+      }}
+    >
+      <div>
+        <h1
+          style={{
+            fontSize: "4rem",
+            fontWeight: "900",
+            backgroundImage: "linear-gradient(to right, red, orange, red)",
+            WebkitBackgroundClip: "text",
+            WebkitTextFillColor: "transparent",
+            animation: "pulse 2s infinite",
+          }}
+        >
+          Gunsmoke3D
+        </h1>
+        <p
+          style={{
+            fontSize: "1.2rem",
+            color: "#ccc",
+            maxWidth: "600px",
+            margin: "1rem auto",
+          }}
+        >
+          Create, visualize, and relive intense courtroom drama.
+        </p>
+      </div>
 
-      <Link href="/create-scene-from-transcript">
-        <div className="text-blue-600">Create Scene from Transcript</div>
-      </Link>
-      <br></br>
-      {/* <Link href="/courtroom">
-        <div className="text-blue-600">Courtroom</div>
-      </Link> */}
-      <br></br>
-      <Link href="/scenes">
-        <div className="text-blue-600">Scenes</div>
-      </Link>
+      <div
+        style={{
+          marginTop: "2rem",
+          display: "flex",
+          flexDirection: "column",
+          gap: "1.5rem",
+          width: "100%",
+          maxWidth: "400px",
+        }}
+      >
+        <Link href="/create-scene-from-transcript">
+          <div
+            style={{
+              backgroundColor: "#b91c1c",
+              padding: "1rem",
+              borderRadius: "1rem",
+              textAlign: "center",
+              fontWeight: "600",
+              fontSize: "1.1rem",
+              cursor: "pointer",
+              boxShadow: "0 4px 12px rgba(255,0,0,0.4)",
+              transition: "all 0.3s ease",
+            }}
+            onMouseEnter={(e) =>
+              (e.currentTarget.style.backgroundColor = "#991b1b")
+            }
+            onMouseLeave={(e) =>
+              (e.currentTarget.style.backgroundColor = "#b91c1c")
+            }
+          >
+            🎬 Create Scene from Transcript
+          </div>
+        </Link>
+
+        {/* Uncomment when Courtroom is ready */}
+        {/* <Link href="/courtroom">
+          <div style={{ ...buttonStyle, backgroundColor: "#2563eb" }}>
+            ⚖️ Enter the Courtroom
+          </div>
+        </Link> */}
+
+        <Link href="/scenes">
+          <div
+            style={{
+              backgroundColor: "#6b21a8",
+              padding: "1rem",
+              borderRadius: "1rem",
+              textAlign: "center",
+              fontWeight: "600",
+              fontSize: "1.1rem",
+              cursor: "pointer",
+              boxShadow: "0 4px 12px rgba(128,0,255,0.4)",
+              transition: "all 0.3s ease",
+            }}
+            onMouseEnter={(e) =>
+              (e.currentTarget.style.backgroundColor = "#581c87")
+            }
+            onMouseLeave={(e) =>
+              (e.currentTarget.style.backgroundColor = "#6b21a8")
+            }
+          >
+            🎥 View Scenes
+          </div>
+        </Link>
+      </div>
+
+      {/* Keyframe style for pulse animation */}
+      <style jsx>{`
+        @keyframes pulse {
+          0% {
+            transform: scale(1);
+          }
+          50% {
+            transform: scale(1.05);
+          }
+          100% {
+            transform: scale(1);
+          }
+        }
+      `}</style>
     </div>
   );
 }

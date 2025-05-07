@@ -55,6 +55,7 @@ setupGoogleCredentialsFromBase64(); // 🧠 MUST be before using any GCP clients
 const textToSpeech = require("@google-cloud/text-to-speech");
 const client = new textToSpeech.TextToSpeechClient();
 const { Storage } = require("@google-cloud/storage");
+const { log } = require("console");
 const storage = new Storage();
 
 const app = express();
@@ -136,8 +137,8 @@ const phonemeToViseme = {
 // const MAX_CHUNKS = 518;
 // const MAX_CHUNKS = 44;
 const MAX_CHUNKS = 10;
-const DEV_MAX_CHUNKS = Infinity; // For local testing
-// const DEV_MAX_CHUNKS = 44; // For local testing
+let DEV_MAX_CHUNKS = Infinity;
+
 const textChunkSize = 7000;
 
 function splitBySpeakerAndLength(text, maxChars = 7000) {
@@ -197,7 +198,7 @@ async function getAllLinesForScene(sceneId) {
   return allRows;
 }
 
-app.post("/upload", upload.single("pdf"), async (req, res) => {
+app.post("/upload", upload.any(), async (req, res) => {
   try {
     console.log("📥 Received PDF upload...");
     sendSlackMessage(
@@ -207,7 +208,12 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
     );
 
     const sceneId = crypto.randomUUID();
-    const filePath = req.file.path;
+    const file = req.files.find((f) => f.fieldname === "pdf");
+    if (!file) {
+      throw new Error("❌ No PDF file found in upload.");
+    }
+    const filePath = file.path;
+
     const dataBuffer = fs.readFileSync(filePath);
     const parsed = await pdfParse(dataBuffer);
     const docMetadata = await analyzeRawDocument(parsed.text);
@@ -221,6 +227,32 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
     );
 
     const chunks = splitBySpeakerAndLength(parsed.text, textChunkSize);
+    if (req.body.pdf_percent !== undefined) {
+      const percent = parseFloat(req.body.pdf_percent);
+      if (!isNaN(percent)) {
+        DEV_MAX_CHUNKS =
+          percent === 100
+            ? Infinity
+            : Math.ceil((percent / 100) * chunks.length);
+        console.log(
+          `🔢 DEV_MAX_CHUNKS set to ${DEV_MAX_CHUNKS} based on ${percent}% slider`
+        );
+      }
+    }
+    console.log(`📦 Split PDF into ${chunks.length} chunks`);
+    console.log(`req.body.pdf_percent`, req.body.pdf_percent);
+    if (req.body.pdf_percent !== undefined) {
+      const percent = parseFloat(req.body.pdf_percent);
+      if (!isNaN(percent)) {
+        DEV_MAX_CHUNKS =
+          percent === 100
+            ? Infinity
+            : Math.ceil((percent / 100) * chunks.length);
+        console.log(
+          `🔢 DEV_MAX_CHUNKS set to ${DEV_MAX_CHUNKS} based on ${percent}% slider`
+        );
+      }
+    }
     const speakerMap = await buildSpeakerMap(chunks);
 
     const allLines = [];
@@ -276,6 +308,13 @@ app.post("/upload", upload.single("pdf"), async (req, res) => {
       await assignZones(sceneId, lineCounter - batchLines.length, lineCounter);
 
       processedChunks += chunkBatch.length;
+
+      sendToClients({
+        type: "progress",
+        message: `${processedChunks}/${chunks.length}`,
+        percent: Math.round((processedChunks / chunks.length) * 100),
+        timestamp: new Date().toISOString(),
+      });
 
       // ✅ Emit scene ID after first chunk batch is processed and saved
       // if (start === 0) {
@@ -1975,10 +2014,10 @@ function sendToClients(data) {
   let payload = "";
 
   if (data.type === "scene_id") {
-    // Named event for scene ID
     payload = `event: scene_id\n` + `data: ${JSON.stringify(data)}\n\n`;
+  } else if (data.type === "progress") {
+    payload = `event: progress\n` + `data: ${JSON.stringify(data)}\n\n`;
   } else {
-    // Generic log event
     payload = `data: ${JSON.stringify(data)}\n\n`;
   }
 

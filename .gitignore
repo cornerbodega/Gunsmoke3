@@ -1,8 +1,9 @@
 server/node_modules/*
 client/node_modules*
 client/*next*
-client/tmp
+client/tmp*
+client/pdf-prep/*pdf
+client/pdf-prep/*txt
 .env
 server/uploads/*
 server/videos/*
-client/tmp/*
