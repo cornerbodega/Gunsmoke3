@@ -1038,7 +1038,7 @@ export default function CourtroomScene({
                               registerCharacter={registerCharacter}
                               lookTargetRef={lookTargetRef}
                               judgeStyle={getStyleForCharacter(
-                                "court",
+                                "the_court",
                                 "judge"
                               )}
                               endIndex={endIndex}
