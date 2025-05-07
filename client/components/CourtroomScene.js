@@ -32,8 +32,19 @@ import {
   StenographerStation,
   JuryBox,
   CeilingLight,
-  Character, // make sure this Character includes your MouthViseme rendering
 } from "@/components/CourtroomPrimatives";
+// Optimize Character rendering to avoid unnecessary re-renders
+import { Character as RawCharacter } from "@/components/CourtroomPrimatives";
+
+const Character = React.memo(RawCharacter, (prev, next) => {
+  return (
+    prev.characterId === next.characterId &&
+    prev.params?.emotion === next.params?.emotion &&
+    prev.params?.style === next.params?.style &&
+    prev.params?.activeSpeakerId === next.params?.activeSpeakerId &&
+    prev.params?.audioTime === next.params?.audioTime
+  );
+});
 
 export default function CourtroomScene({
   lines,
@@ -71,6 +82,24 @@ export default function CourtroomScene({
   const [showDefaultJudge, setShowDefaultJudge] = useState(false);
   const [showJury, setShowJury] = useState(true);
 
+  const audienceIds = useMemo(() => {
+    const ids = [];
+    [5, 8, 11, 14].forEach((z) => {
+      [-12, -7.5, -3.5, 3.5, 7.5, 12].forEach((x) => {
+        const skip = [
+          [-7.5, 5],
+          [7.5, 8],
+          [-3.5, 11],
+          [12, 14],
+        ].some(([sx, sz]) => sx === x && sz === z);
+        if (!skip) {
+          ids.push(`audience-${x}-${z}`);
+        }
+      });
+    });
+    return ids;
+  }, []);
+
   const aliasMap = useMemo(() => {
     const map = {
       prosecutor: "prosecutor1",
@@ -80,28 +109,7 @@ export default function CourtroomScene({
     };
     console.log("lines");
     console.log(lines);
-    // Collect all audience IDs
-    const audienceIds = [];
-    [5, 8, 11, 14].forEach((z) => {
-      [-12, -7.5, -3.5, 3.5, 7.5, 12].forEach((x) => {
-        // Skip the known skip pattern
-        const skip = [
-          [-7.5, 5],
-          [7.5, 8],
-          [-3.5, 11],
-          [12, 14],
-        ].some(([sx, sz]) => sx === x && sz === z);
-        if (!skip) {
-          audienceIds.push(`audience-${x}-${z}`);
-        }
-      });
-    });
-
-    // Pick a random one
-    const randomAudience =
-      audienceIds[Math.floor(Math.random() * audienceIds.length)];
-
-    map.audience = randomAudience;
+    map.audience = audienceIds[Math.floor(Math.random() * audienceIds.length)];
 
     // Preserve role-to-character_id mapping from lines
     lines.forEach(({ line_obj }) => {
@@ -588,95 +596,108 @@ export default function CourtroomScene({
     if (currentIndex === -1) return;
     const currentLine = lines[currentIndex]?.line_obj;
     const speakerId = currentLine?.role;
-    const targetId = currentLine?.eye_target;
-    console.log(
-      `New active speaker: ${speakerId}, intended target: ${targetId}`
-    );
-    let speakerHead = null;
-    let targetHead = null;
-    if (speakerId && resolvedCharacterRefs[speakerId]?.headRef) {
-      speakerHead = resolvedCharacterRefs[speakerId].headRef;
-    } else {
-      console.warn(`Speaker head not found for id: ${speakerId}`);
-    }
-    if (targetId && resolvedCharacterRefs[targetId]?.headRef) {
-      targetHead = resolvedCharacterRefs[targetId].headRef;
-    } else {
-      console.warn(`Target head not found for id: ${targetId}`);
-    }
-    // Prevent self-looking.
-    if (speakerId === targetId) {
-      console.warn(
-        `Speaker ${speakerId} is targeting themselves. Using fallback.`
-      );
-      targetHead = currentLine.eye_target
-        ? resolvedCharacterRefs[currentLine.eye_target]?.headRef
-        : null;
-    }
-    if (!targetHead && targetId) {
-      console.warn(`❗ No head found for targetId: "${targetId}"`);
-    }
-
-    console.log("Looking for target head by role:", targetId);
-    console.log("Found target head:", resolvedCharacterRefs[targetId]?.headRef);
-
-    // Update shared look target for non‑speakers.
-    if (speakerHead) {
-      const pos = new THREE.Vector3();
-      speakerHead.getWorldPosition(pos);
-      lookTargetRef.current.position.copy(pos);
-    }
-    // Update speaker target for the active speaker.
-    if (speakerHead && targetHead) {
-      const pos2 = new THREE.Vector3();
-      targetHead.getWorldPosition(pos2);
-      pos2.y += 0.25;
-      speakerTargetRef.current.position.copy(pos2);
-      console.log(`Speaker ${speakerId} will look at ${targetId}.`);
-    } else {
+    let targetId = currentLine?.eye_target;
+    if (targetId) {
+      if (targetId === "audience") {
+        const randomIndex = currentLine.line_id % audienceIds.length;
+        targetId = audienceIds[randomIndex];
+      }
       console.log(
-        `Speaker ${speakerId} has no valid target. Falling back to judge.`
+        `New active speaker: ${speakerId}, intended target: ${targetId}`
       );
-      if (resolvedCharacterRefs["judge"]?.headRef) {
-        const pos3 = new THREE.Vector3();
-        resolvedCharacterRefs["judge"].headRef.getWorldPosition(pos3);
-        pos3.y += 0.25;
-        speakerTargetRef.current.position.copy(pos3);
-        console.log(`Speaker ${speakerId} falling back to judge as target.`);
+      let speakerHead = null;
+      let targetHead = null;
+      if (speakerId && resolvedCharacterRefs[speakerId]?.headRef) {
+        speakerHead = resolvedCharacterRefs[speakerId].headRef;
+      } else {
+        console.warn(`Speaker head not found for id: ${speakerId}`);
+      }
+      if (targetId && resolvedCharacterRefs[targetId]?.headRef) {
+        targetHead = resolvedCharacterRefs[targetId].headRef;
+      } else {
+        console.warn(`Target head not found for id: ${targetId}`);
+      }
+      // Prevent self-looking.
+      if (speakerId === targetId) {
+        console.warn(
+          `Speaker ${speakerId} is targeting themselves. Using fallback.`
+        );
+        targetHead = currentLine.eye_target
+          ? resolvedCharacterRefs[currentLine.eye_target]?.headRef
+          : null;
+      }
+      if (!targetHead && targetId) {
+        console.warn(`❗ No head found for targetId: "${targetId}"`);
+      }
+
+      console.log("Looking for target head by role:", targetId);
+      console.log(
+        "Found target head:",
+        resolvedCharacterRefs[targetId]?.headRef
+      );
+
+      // Update shared look target for non‑speakers.
+      if (speakerHead) {
+        const pos = new THREE.Vector3();
+        speakerHead.getWorldPosition(pos);
+        lookTargetRef.current.position.copy(pos);
+      }
+      // Update speaker target for the active speaker.
+      if (speakerHead && targetHead) {
+        const pos2 = new THREE.Vector3();
+        targetHead.getWorldPosition(pos2);
+        pos2.y += 0.25;
+        speakerTargetRef.current.position.copy(pos2);
+        console.log(`Speaker ${speakerId} will look at ${targetId}.`);
+      } else {
+        console.log(
+          `Speaker ${speakerId} has no valid target. Falling back to judge.`
+        );
+        if (resolvedCharacterRefs["judge"]?.headRef) {
+          const pos3 = new THREE.Vector3();
+          resolvedCharacterRefs["judge"].headRef.getWorldPosition(pos3);
+          pos3.y += 0.25;
+          speakerTargetRef.current.position.copy(pos3);
+          console.log(`Speaker ${speakerId} falling back to judge as target.`);
+        }
       }
     }
   }, [currentIndex, lines]);
 
   // --- Continuously Update Targets (inside Canvas) ---
   function TargetUpdater({ introPlaying }) {
+    const frameCount = useRef(0);
     useFrame(() => {
+      frameCount.current++;
+      if (frameCount.current % 3 !== 0) return; // Skip 2 of every 3 frames
+
       if (introPlaying) {
-        // Force everyone to look at the judge while the intro is playing.
-        if (resolvedCharacterRefs["judge"]?.headRef) {
+        const judge = resolvedCharacterRefs["judge"]?.headRef;
+        if (judge) {
           const pos = new THREE.Vector3();
-          resolvedCharacterRefs["judge"].headRef.getWorldPosition(pos);
+          judge.getWorldPosition(pos);
           pos.y += 0.25;
           lookTargetRef.current.position.copy(pos);
         }
-        return; // Skip the rest of the logic during the intro.
+        return;
       }
 
-      // Normal target updater logic:
-      if (currentIndex === -1) return;
       const currentLine = lines[currentIndex]?.line_obj;
       if (!currentLine) return;
+
       const speakerId = currentLine.character_id;
       const targetId = currentLine.eye_target;
+
       const speakerObj = resolvedCharacterRefs[speakerId];
-      if (speakerObj && speakerObj.headRef) {
+      const targetObj =
+        resolvedCharacterRefs[targetId] || resolvedCharacterRefs["judge"];
+
+      if (speakerObj?.headRef) {
         const pos = new THREE.Vector3();
         speakerObj.headRef.getWorldPosition(pos);
         lookTargetRef.current.position.copy(pos);
       }
-      const targetObj =
-        (targetId && resolvedCharacterRefs[targetId]) ||
-        resolvedCharacterRefs["judge"];
-      if (speakerObj && targetObj && targetObj.headRef) {
+      if (targetObj?.headRef) {
         const pos2 = new THREE.Vector3();
         targetObj.headRef.getWorldPosition(pos2);
         pos2.y += 0.25;
@@ -782,9 +803,8 @@ export default function CourtroomScene({
       // console.log(`🧑‍⚖️ Processing line:`, line_obj);
 
       const { character_id, role, style } = line_obj;
-      if (character_id && style && !mapping[character_id]) {
+      if (character_id && style) {
         let styleObj = { ...style };
-        // if the role is judge then make clothes black
         if (role === "judge") {
           styleObj = {
             ...style,
@@ -792,8 +812,10 @@ export default function CourtroomScene({
             shirt_color: "#000000",
           };
         }
-
-        mapping[character_id] = styleObj;
+        mapping[character_id] = mapping[character_id] || styleObj;
+        if (role) {
+          mapping[role] = mapping[role] || styleObj;
+        }
       }
     });
     // console.log("✅ Final style mapping from DB:", mapping);
@@ -920,6 +942,21 @@ export default function CourtroomScene({
     });
     return null;
   }
+
+  const zoneOccupancyMemo = useMemo(() => {
+    return getZoneOccupancy(
+      lines,
+      currentIndex === -1 ? lines.length - 1 : currentIndex
+    ).zoneOccupancy;
+  }, [lines, currentIndex]);
+
+  const judgeCharacterId = useMemo(() => {
+    const line = lines.find((l) => l.line_obj?.role === "judge");
+    return line?.line_obj?.character_id ?? "judge";
+  }, [lines]);
+
+  const judgeStyle = getStyleForCharacter(judgeCharacterId, "judge");
+
   return (
     <div style={{ width: "100vw", height: "100vh" }}>
       <Canvas
@@ -1029,7 +1066,7 @@ export default function CourtroomScene({
                       if (!characterId) return <React.Fragment key={zone} />;
 
                       // Special handling for the judge.
-                      if (characterId === "judge") {
+                      if (characterId === judgeCharacterId) {
                         if (playTriggered && introPlaying) {
                           return (
                             <JudgeIntroAnimation
@@ -1037,10 +1074,8 @@ export default function CourtroomScene({
                               folderName={folderName}
                               registerCharacter={registerCharacter}
                               lookTargetRef={lookTargetRef}
-                              judgeStyle={getStyleForCharacter(
-                                "the_court",
-                                "judge"
-                              )}
+                              judgeCharacterId={judgeCharacterId}
+                              judgeStyle={judgeStyle}
                               endIndex={endIndex}
                               eyeTargetRef={cameraTargetRef}
                               introPlaying={introPlaying}
@@ -1067,13 +1102,20 @@ export default function CourtroomScene({
                                 "judge_sitting_at_judge_bench"
                               )}
                               onReady={(headRef) =>
-                                registerCharacter("judge", headRef, "judge")
+                                registerCharacter(
+                                  judgeCharacterId,
+                                  headRef,
+                                  "judge"
+                                )
                               }
                               params={{
                                 sitting: true,
                                 role: "judge",
-                                characterId: "judge",
-                                style: getStyleForCharacter("judge", "judge"),
+                                characterId: judgeCharacterId,
+                                style: getStyleForCharacter(
+                                  judgeCharacterId,
+                                  "judge"
+                                ),
                                 eyeTargetRef: lookTargetRef,
                                 speakerTargetRef,
                                 activeSpeakerId,
@@ -1317,6 +1359,7 @@ function JudgeIntroAnimation({
   onComplete,
   lookTargetRef,
   judgeStyle,
+  judgeCharacterId,
   folderName,
   resolvedCharacterRefs,
   registerCharacter,
@@ -1441,8 +1484,10 @@ function JudgeIntroAnimation({
     <group ref={judgeRef}>
       <Character
         role="judge"
-        characterId="judge"
-        onReady={(headRef) => registerCharacter("judge", headRef, "judge")}
+        characterId={judgeCharacterId}
+        onReady={(headRef) =>
+          registerCharacter(judgeCharacterId, headRef, "judge")
+        }
         params={{
           style: judgeStyle,
           sitting: false,

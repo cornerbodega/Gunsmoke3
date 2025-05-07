@@ -791,39 +791,35 @@ async function extractCharactersFromChunk(chunkText, speakerMap) {
     const prompt = `
     The following is text from a courtroom transcript. Extract all **unique speakers**, and return their:
     
-    - Full name
     - Speaker label (e.g., "Q", "A", "THE COURT")
     - Role (one of these: judge, witness, prosecutor, defense)
-    - A normalized ID with (the_court for judge, gender_name for everyone else)
+    - A normalized ID that is the standardized name, unless it's the Judge
     Return an array like:
     
     [
       {
-        "name": "Mr. Bankman-Fried",
         "speaker_label": "A",
         "role": "witness",
         "id": "mr_bankmanfried"
       },
       {
-        "name": "Ms. Sassoon",
         "speaker_label": "Q",
         "role": "prosecutor",
         "id": "ms_sassoon"
       },
       {
-        "name": "Mr. Cohen",
         "speaker_label": "Q",
         "role": "defense",
         "id": "mr_cohen"
       },
-        {
-        "name": "Judge Cannon",
+      {
         "speaker_label": "THE COURT",
         "role": "judge",
-        "id": "the_court"
+        "id": "judge_cannon"
       }
     ]
-
+    Here are the characters we have so far, do not repeat these:
+    ${JSON.stringify(speakerMap)}
     ⚠️ Use context to infer the roles:
     The name must be a real name, not Q or A or Unknown. If you don't know, don't return it.
     ⚠️ Do NOT wrap your response in markdown. Return raw JSON only.
@@ -847,9 +843,7 @@ async function extractCharactersFromChunk(chunkText, speakerMap) {
         { role: "system", content: prompt },
         {
           role: "user",
-          content: `Input: ${slicedInput}.\n\n Characters so far: ${JSON.stringify(
-            speakerMap
-          )}`,
+          content: `Input: ${slicedInput}.}`,
         },
       ],
     });
@@ -883,7 +877,7 @@ async function cleanText(chunkText, speakerMap, previousLines) {
 
   const sampleOutput = `${JSON.stringify([
     {
-      character_id: "the_court",
+      character_id: "justice_nicol",
       role: "judge",
       posture: "seated",
       emotion: "neutral",
@@ -892,7 +886,7 @@ async function cleanText(chunkText, speakerMap, previousLines) {
       pause_before: 0.5,
     },
     {
-      character_id: "the_court",
+      character_id: "justice_nicol",
       role: "judge",
       posture: "seated",
       emotion: "neutral",
@@ -901,7 +895,7 @@ async function cleanText(chunkText, speakerMap, previousLines) {
       pause_before: 0.5,
     },
     {
-      character_id: "the_court",
+      character_id: "justice_nicol",
       role: "judge",
       posture: "seated",
       emotion: "neutral",
@@ -910,7 +904,7 @@ async function cleanText(chunkText, speakerMap, previousLines) {
       pause_before: 0.5,
     },
     {
-      character_id: "the_court",
+      character_id: "justice_nicol",
       role: "judge",
       posture: "seated",
       emotion: "neutral",
@@ -919,7 +913,7 @@ async function cleanText(chunkText, speakerMap, previousLines) {
       pause_before: 0.5,
     },
     {
-      character_id: "the_court",
+      character_id: "justice_nicol",
       role: "judge",
       posture: "seated",
       emotion: "neutral",
@@ -928,7 +922,7 @@ async function cleanText(chunkText, speakerMap, previousLines) {
       pause_before: 0.5,
     },
     {
-      character_id: "the_court",
+      character_id: "justice_nicol",
       role: "judge",
       posture: "seated",
       emotion: "firm",
@@ -937,7 +931,7 @@ async function cleanText(chunkText, speakerMap, previousLines) {
       pause_before: 0.6,
     },
     {
-      character_id: "the_court",
+      character_id: "justice_nicol",
       role: "judge",
       posture: "seated",
       emotion: "neutral",
@@ -946,7 +940,7 @@ async function cleanText(chunkText, speakerMap, previousLines) {
       pause_before: 0.5,
     },
     {
-      character_id: "the_court",
+      character_id: "justice_nicol",
       role: "judge",
       posture: "seated",
       emotion: "grateful",
@@ -955,7 +949,7 @@ async function cleanText(chunkText, speakerMap, previousLines) {
       pause_before: 0.5,
     },
     {
-      character_id: "the_court",
+      character_id: "justice_nicol",
       role: "judge",
       posture: "seated",
       emotion: "neutral",
@@ -964,7 +958,7 @@ async function cleanText(chunkText, speakerMap, previousLines) {
       pause_before: 0.5,
     },
     {
-      character_id: "the_court",
+      character_id: "justice_nicol",
       role: "judge",
       posture: "seated",
       emotion: "neutral",
@@ -973,7 +967,7 @@ async function cleanText(chunkText, speakerMap, previousLines) {
       pause_before: 0.5,
     },
     {
-      character_id: "the_court",
+      character_id: "justice_nicol",
       role: "judge",
       posture: "seated",
       emotion: "neutral",
@@ -987,7 +981,7 @@ async function cleanText(chunkText, speakerMap, previousLines) {
       posture: "standing",
       emotion: "respectful",
       text: "May it please your Lordship, I appear with Ms. Laws and Ms. Wilson on behalf of the claimant, Johnny Depp.",
-      eye_target: "the_court",
+      eye_target: "justice_nicol",
       pause_before: 0.5,
     },
     {
@@ -996,7 +990,7 @@ async function cleanText(chunkText, speakerMap, previousLines) {
       posture: "standing",
       emotion: "neutral",
       text: "My learned friends Ms. Wass, Mr. Wolanski, and Ms. Hamer appear for the defendants.",
-      eye_target: "the_court",
+      eye_target: "justice_nicol",
       pause_before: 0.5,
     },
   ])}`;
