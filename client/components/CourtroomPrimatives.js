@@ -46,7 +46,7 @@ export const Floor = () => (
 );
 
 export const Ceiling = () => (
-  <Box position={[0, 22, 0]} args={[40, 0.5, 40]} color="#bbb" />
+  <Box position={[0, 22, 0]} args={[40, 0.5, 40]} color="#4a2c14" />
 );
 
 export const Wall = ({ position, rotation }) => (

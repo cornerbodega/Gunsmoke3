@@ -11,9 +11,13 @@ export default function CameraController({ activePreset }) {
   const cameraPresets = useMemo(
     () => ({
       wide_establishing: {
-        position: new THREE.Vector3(0, 10, 19.6),
-        lookAt: new THREE.Vector3(0, 5, 0),
+        position: new THREE.Vector3(0, 4, 19.6),
+        lookAt: new THREE.Vector3(0, 3, 0),
       },
+      // front_row: {
+      //   position: new THREE.Vector3(-10, 3, 9.6),
+      //   lookAt: new THREE.Vector3(-6, 2, 0),
+      // },
       crossExaminationFromWell: {
         position: new THREE.Vector3(-17, 4, -10.5),
         lookAt: new THREE.Vector3(0, 3, -9),
