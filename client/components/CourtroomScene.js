@@ -81,6 +81,7 @@ export default function CourtroomScene({
   const [showDefaultClerk, setShowDefaultClerk] = useState(true);
   const [showDefaultJudge, setShowDefaultJudge] = useState(false);
   const [showJury, setShowJury] = useState(true);
+  const combinedStreamRef = useRef(null);
 
   const audienceIds = useMemo(() => {
     const ids = [];
@@ -288,6 +289,7 @@ export default function CourtroomScene({
       result.push({ time: i / decoded.sampleRate, amplitude: avg });
     }
 
+    ctx.close();
     return result;
   }
 
@@ -379,7 +381,11 @@ export default function CourtroomScene({
 
       const blob = await stopRecordingSegment();
       console.log(`🎤 Stopping recording for line ${line_id}`);
-
+      if (combinedStreamRef.current) {
+        combinedStreamRef.current.getTracks().forEach((t) => t.stop());
+        combinedStreamRef.current = null;
+      }
+      
       if (blob) {
         const formData = new FormData();
         formData.append("video", blob, `scene_segment_${line_id}.webm`);
@@ -392,6 +398,9 @@ export default function CourtroomScene({
             method: "POST",
             body: formData,
           });
+
+          recordedChunks.current = [];
+          mediaRecorder.current = null;
 
           console.log(`✅ MP4 uploaded for line_id ${line_id}`);
           if (i === endIndex) {
@@ -416,15 +425,17 @@ export default function CourtroomScene({
       return;
     }
 
-    const canvasStream = canvasRef.current.captureStream(60);
+    const canvasStream = canvasRef.current.captureStream(30);
     const audioStream = audioDestRef.current.stream;
-    const combinedStream = new MediaStream([
+    combinedStreamRef.current = new MediaStream([
       ...canvasStream.getTracks(),
       ...audioStream.getTracks(),
     ]);
 
     mediaRecorder.current = new MediaRecorder(combinedStream, {
       mimeType: "video/webm; codecs=vp9",
+      videoBitsPerSecond: 4000000, // or 2500000 for 720p
+
     });
 
     mediaRecorder.current.ondataavailable = (event) => {
@@ -510,11 +521,13 @@ export default function CourtroomScene({
     }
     const canvasStream = canvasRef.current.captureStream(60);
     const audioStream = audioDestRef.current.stream;
-    const combinedStream = new MediaStream([
+    combinedStreamRef.current = new MediaStream([
       ...canvasStream.getTracks(),
       ...audioStream.getTracks(),
     ]);
-
+    
+    mediaRecorder.current = new MediaRecorder(combinedStreamRef.current, {
+    
     mediaRecorder.current = new MediaRecorder(combinedStream, {
       mimeType: "video/webm; codecs=vp9",
     });
@@ -536,6 +549,10 @@ export default function CourtroomScene({
         mediaRecorder.current.state === "recording"
       ) {
         mediaRecorder.current.onstop = () => {
+          if (combinedStreamRef.current) {
+            combinedStreamRef.current.getTracks().forEach((t) => t.stop());
+            combinedStreamRef.current = null;
+          }
           const blob = new Blob(recordedChunks.current, { type: "video/webm" });
           resolve(blob);
         };
