@@ -30,6 +30,13 @@ Gunsmoke3D uses artificial intelligence throughout the pipeline:
 
 ---
 
+## 🧪 Example Output
+
+➡️ [Watch: Elizabeth Holmes Courtroom Animation (Gunsmoke3D Demo)](https://www.youtube.com/watch?v=HhZLryAbja0)  
+📝 Source Transcript: [SEC – Holmes Testimony](https://www.sec.gov/oso/elizabeth-holmes-transcript)
+
+---
+
 ## 🚀 Getting Started
 
 ### 1. Clone the Repository
