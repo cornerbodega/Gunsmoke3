@@ -2,7 +2,7 @@
 
 **Gunsmoke3D** is a 3D courtroom simulation engine that transforms courtroom transcripts into fully animated scenes — complete with synced audio, emotional expressions, and cinematic camera work.
 
-Built with **Next.js**, **React Three Fiber**, and **Supabase**, it supports transcript-driven playback, live recording, Slack integration, and downloadable chapter files.
+Built with **Next.js**, **React Three Fiber**, **Supabase**, and **AI-driven services**, it supports transcript-driven playback, live recording, Slack integration, and downloadable chapter files.
 
 ---
 
@@ -15,6 +15,18 @@ Built with **Next.js**, **React Three Fiber**, and **Supabase**, it supports tra
 - 🎥 Scene recording (WebM video + audio stream)
 - 📁 Downloadable chapter files
 - 🗂️ Scene viewer with metadata and summaries
+
+---
+
+## 🤖 AI Capabilities
+
+Gunsmoke3D uses artificial intelligence throughout the pipeline:
+
+- 🧾 **Transcript Parsing & Scene Segmentation** – OpenAI models process raw courtroom transcripts into structured scenes and dialogue lines.
+- 🗣️ **Voice Generation** – AI-generated voices (TTS) synthesize courtroom lines using emotion and speaker context.
+- 🧠 **Emotion Detection** – GPT models infer emotions per line for realistic character expression and tone.
+- 👄 **Lip Sync Processing** – Combines viseme frames (model-generated) with real-time amplitude analysis to align lip movement with audio.
+- 📊 **Summarization & Metadata** – AI automatically generates summaries and titles for each scene.
 
 ---
 
