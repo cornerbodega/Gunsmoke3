@@ -385,7 +385,7 @@ export default function CourtroomScene({
         combinedStreamRef.current.getTracks().forEach((t) => t.stop());
         combinedStreamRef.current = null;
       }
-      
+
       if (blob) {
         const formData = new FormData();
         formData.append("video", blob, `scene_segment_${line_id}.webm`);
@@ -435,7 +435,6 @@ export default function CourtroomScene({
     mediaRecorder.current = new MediaRecorder(combinedStream, {
       mimeType: "video/webm; codecs=vp9",
       videoBitsPerSecond: 4000000, // or 2500000 for 720p
-
     });
 
     mediaRecorder.current.ondataavailable = (event) => {
@@ -525,10 +524,8 @@ export default function CourtroomScene({
       ...canvasStream.getTracks(),
       ...audioStream.getTracks(),
     ]);
-    
+
     mediaRecorder.current = new MediaRecorder(combinedStreamRef.current, {
-    
-    mediaRecorder.current = new MediaRecorder(combinedStream, {
       mimeType: "video/webm; codecs=vp9",
     });
 
