@@ -38,11 +38,11 @@ export default async function handler(req, res) {
     const filename = Array.isArray(file)
       ? file[0].originalFilename
       : file.originalFilename;
-
     try {
       const fileBuffer = fs.readFileSync(filePath);
       const formData = new FormData();
       formData.append("pdf", fileBuffer, filename);
+      formData.append("user_id", fields.user_id?.[0] || fields.user_id); // ✅ forward user_id
 
       const response = await axios.post(SERVER_URL, formData, {
         headers: { ...formData.getHeaders() },

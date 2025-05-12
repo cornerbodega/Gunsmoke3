@@ -17,6 +17,33 @@ export default function CreateScene() {
   console.log(`create scene user?.id: ${user?.id}`);
   const isLoading = phase === "preview" || phase === "processing";
 
+  const handleCancel = async () => {
+    const jobId = previewData?.sessionId;
+    if (!jobId) {
+      alert("No active job to cancel.");
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/cancel-job", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ job_id: jobId }),
+      });
+
+      if (res.ok) {
+        setStatusMessage("🛑 Job cancelled.");
+        setPhase(null);
+      } else {
+        const result = await res.json();
+        setStatusMessage(`❌ Cancel failed: ${result.error}`);
+      }
+    } catch (err) {
+      console.error("Cancel failed:", err);
+      setStatusMessage("❌ Cancel request failed.");
+    }
+  };
+
   const handleFileUpload = (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -27,6 +54,7 @@ export default function CreateScene() {
 
     const formData = new FormData();
     formData.append("pdf", file);
+    formData.append("user_id", user?.id || "");
 
     let fakeProgress = 0;
     const interval = setInterval(() => {
@@ -77,6 +105,7 @@ export default function CreateScene() {
         gcsPath,
         pdf_percent: pdfPercent,
         user_id: user.id,
+        scene_id: previewData?.sessionId,
       }),
     });
 
@@ -294,6 +323,24 @@ export default function CreateScene() {
             </pre>
           </div>
         </>
+      )}
+      {phase === "processing" && (
+        <button
+          onClick={handleCancel}
+          style={{
+            padding: "10px 20px",
+            backgroundColor: "#ff4d4d",
+            color: "#fff",
+            border: "none",
+            borderRadius: "6px",
+            cursor: "pointer",
+            fontWeight: 600,
+            marginTop: "12px",
+            marginLeft: "12px",
+          }}
+        >
+          ❌ Cancel Job
+        </button>
       )}
 
       <div style={{ marginTop: "40px" }}>
