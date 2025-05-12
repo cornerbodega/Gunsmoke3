@@ -1,125 +1,69 @@
-import Link from "next/link";
+// pages/index.js
+import { useEffect } from "react";
+import { useRouter } from "next/router";
+import { supabase } from "@/utils/supabase";
+export default function IndexPage() {
+  const router = useRouter();
 
-export default function Home() {
+  useEffect(() => {
+    let isMounted = true;
+
+    supabase.auth.getUser().then(({ data }) => {
+      if (isMounted && data?.user) {
+        router.push("/home");
+      }
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [router]);
+
+  async function signInWithGoogle() {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo:
+          process.env.NODE_ENV === "development"
+            ? "http://localhost:3000/home"
+            : "https://yourdomain.com/home", // replace with your real domain
+      },
+    });
+
+    if (error) {
+      console.error("Login error:", error.message);
+    }
+  }
+
   return (
     <div
       style={{
         minHeight: "100vh",
-        background: "linear-gradient(to bottom, black, #111)",
+        background: "black",
         color: "white",
         display: "flex",
-        flexDirection: "column",
         justifyContent: "center",
         alignItems: "center",
-        padding: "2rem",
-        textAlign: "center",
+        flexDirection: "column",
       }}
     >
-      <div>
-        <h1
-          style={{
-            fontSize: "4rem",
-            fontWeight: "900",
-            backgroundImage: "linear-gradient(to right, red, orange, red)",
-            WebkitBackgroundClip: "text",
-            WebkitTextFillColor: "transparent",
-            animation: "pulse 2s infinite",
-          }}
-        >
-          Gunsmoke3D
-        </h1>
-        <p
-          style={{
-            fontSize: "1.2rem",
-            color: "#ccc",
-            maxWidth: "600px",
-            margin: "1rem auto",
-          }}
-        >
-          Create, visualize, and relive intense courtroom drama.
-        </p>
-      </div>
-
-      <div
+      <h1 style={{ fontSize: "3rem", marginBottom: "2rem" }}>
+        Welcome to Gunsmoke3D
+      </h1>
+      <button
+        onClick={signInWithGoogle}
         style={{
-          marginTop: "2rem",
-          display: "flex",
-          flexDirection: "column",
-          gap: "1.5rem",
-          width: "100%",
-          maxWidth: "400px",
+          background: "#db4437",
+          border: "none",
+          padding: "1rem 2rem",
+          borderRadius: "0.5rem",
+          color: "white",
+          fontSize: "1.1rem",
+          cursor: "pointer",
         }}
       >
-        <Link href="/create-scene-from-transcript">
-          <div
-            style={{
-              backgroundColor: "#b91c1c",
-              padding: "1rem",
-              borderRadius: "1rem",
-              textAlign: "center",
-              fontWeight: "600",
-              fontSize: "1.1rem",
-              cursor: "pointer",
-              boxShadow: "0 4px 12px rgba(255,0,0,0.4)",
-              transition: "all 0.3s ease",
-            }}
-            onMouseEnter={(e) =>
-              (e.currentTarget.style.backgroundColor = "#991b1b")
-            }
-            onMouseLeave={(e) =>
-              (e.currentTarget.style.backgroundColor = "#b91c1c")
-            }
-          >
-            🎬 Create Scene from Transcript
-          </div>
-        </Link>
-
-        {/* Uncomment when Courtroom is ready */}
-        {/* <Link href="/courtroom">
-          <div style={{ ...buttonStyle, backgroundColor: "#2563eb" }}>
-            ⚖️ Enter the Courtroom
-          </div>
-        </Link> */}
-
-        <Link href="/scenes">
-          <div
-            style={{
-              backgroundColor: "#6b21a8",
-              padding: "1rem",
-              borderRadius: "1rem",
-              textAlign: "center",
-              fontWeight: "600",
-              fontSize: "1.1rem",
-              cursor: "pointer",
-              boxShadow: "0 4px 12px rgba(128,0,255,0.4)",
-              transition: "all 0.3s ease",
-            }}
-            onMouseEnter={(e) =>
-              (e.currentTarget.style.backgroundColor = "#581c87")
-            }
-            onMouseLeave={(e) =>
-              (e.currentTarget.style.backgroundColor = "#6b21a8")
-            }
-          >
-            🎥 View Scenes
-          </div>
-        </Link>
-      </div>
-
-      {/* Keyframe style for pulse animation */}
-      <style jsx>{`
-        @keyframes pulse {
-          0% {
-            transform: scale(1);
-          }
-          50% {
-            transform: scale(1.05);
-          }
-          100% {
-            transform: scale(1);
-          }
-        }
-      `}</style>
+        Sign in with Google
+      </button>
     </div>
   );
 }

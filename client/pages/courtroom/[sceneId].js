@@ -1,10 +1,9 @@
 // pages/[sceneId].jsx
 
 import CourtroomScene from "@/components/CourtroomScene";
-import { getSupabase } from "@/utils/supabase";
+import { supabase } from "@/utils/supabase";
 
 export async function getServerSideProps(context) {
-  const supabase = getSupabase();
   const { sceneId } = context.params;
   const { folderName, start, end } = context.query;
   const pageSize = 1000;
@@ -45,7 +44,7 @@ export async function getServerSideProps(context) {
     line_obj: {
       character_id: "judge",
       role: "judge",
-      eye_target: "witness",
+      eye_target: "audience",
       zone: "judge_sitting_at_judge_bench",
       text: "Please rise for the honorable judge entering the courtroom.",
       audio_url: "/intro_music.mp3", // swap with your actual audio
