@@ -9,3 +9,5 @@ server/uploads/*
 server/videos/*
 client/.DS_Store
 client/.DS_Store
+/client
+.DS_Store
