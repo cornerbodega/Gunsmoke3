@@ -27,7 +27,7 @@ export default function IndexPage() {
         redirectTo:
           process.env.NODE_ENV === "development"
             ? "http://localhost:3000/home"
-            : "https://yourdomain.com/home", // replace with your real domain
+            : "https://gunsmoke3d.com/home",
       },
     });
 
