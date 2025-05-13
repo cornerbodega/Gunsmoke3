@@ -441,9 +441,13 @@ app.post("/process-pdf", async (req, res) => {
 
     // 🔁 Kick off long process without blocking response
     setTimeout(() => {
-      processPdfInBackground({ userId, sceneId, gcsPath, sessionId }).catch(
-        (err) => console.error("❌ Background processing failed:", err)
-      );
+      processPdfInBackground({
+        userId,
+        sceneId,
+        gcsPath,
+        sessionId,
+        req,
+      }).catch((err) => console.error("❌ Background processing failed:", err));
     }, 0);
 
     // ✅ Respond immediately
@@ -457,7 +461,13 @@ app.post("/process-pdf", async (req, res) => {
     res.status(500).json({ error: "Failed to start processing" });
   }
 });
-async function processPdfInBackground({ userId, sceneId, gcsPath, sessionId }) {
+async function processPdfInBackground({
+  userId,
+  sceneId,
+  gcsPath,
+  sessionId,
+  req,
+}) {
   try {
     console.log("📥 Received PDF upload...");
     const userId = req.body.user_id || "unknown_user";
@@ -625,16 +635,6 @@ async function processPdfInBackground({ userId, sceneId, gcsPath, sessionId }) {
     await saveToSupabase("gs3_scenes", sceneMetadata);
     logToFirebase(userId, "success", `📄 Scene metadata saved for ${sceneId}`);
     await logToFirebase(userId, "scene_id", sceneId); // ✅ ADD THIS LINE
-
-    res.json({
-      message: "✅ Full transcript processed",
-      chunkCount: chunks.length,
-      processedChunkCount: allLines.length,
-      numpages: parsed.numpages,
-      info: parsed.info,
-      characters: Array.from(speakerMap.values()),
-      lines: allLines.map((l) => l.line_obj),
-    });
 
     async function buildSpeakerMap(chunks) {
       const map = new Map();
