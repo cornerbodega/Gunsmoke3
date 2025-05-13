@@ -19,7 +19,7 @@ export default async function handler(req, res) {
     const timeout = setTimeout(() => controller.abort(), 10 * 60 * 1000); // 10 min
 
     const backendResponse = await fetch(
-      `http://localhost:3001/stitch-videos/${sceneId}`,
+      `http://${process.env.NEXT_PUBLIC_SERVER_URL}/stitch-videos/${sceneId}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },

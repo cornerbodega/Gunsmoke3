@@ -12,11 +12,14 @@ export default async function handler(req, res) {
   }
 
   try {
-    const response = await fetch("http://localhost:3001/create-chapters", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ scene_id }),
-    });
+    const response = await fetch(
+      "http://${process.env.NEXT_PUBLIC_SERVER_URL}/create-chapters",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scene_id }),
+      }
+    );
 
     if (!response.ok) {
       return res.status(response.status).send("Failed to fetch chapters");

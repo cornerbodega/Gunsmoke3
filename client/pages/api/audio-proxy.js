@@ -4,9 +4,9 @@ export default async function handler(req, res) {
   const { url } = req.query;
   if (!url) return res.status(400).send("Missing URL");
 
-  const nodeProxyUrl = `http://localhost:3001/audio-proxy?url=${encodeURIComponent(
-    url
-  )}`;
+  const nodeProxyUrl = `http://${
+    process.env.NEXT_PUBLIC_SERVER_URL
+  }/audio-proxy?url=${encodeURIComponent(url)}`;
 
   const fetchWithRetry = async (url, options, retries = 3) => {
     for (let i = 0; i <= retries; i++) {
