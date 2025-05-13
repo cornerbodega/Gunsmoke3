@@ -5,7 +5,7 @@ import FormData from "form-data";
 
 export const config = {
   api: {
-    bodyParser: false, // Required to handle file uploads via streams
+    bodyParser: false,
   },
 };
 
@@ -18,10 +18,10 @@ export default async function handler(req, res) {
 
   const busboy = Busboy({ headers: req.headers });
   const formData = new FormData();
-
   let fileProcessed = false;
+  let userId = null;
 
-  busboy.on("file", (fieldname, file, filename, encoding, mimetype) => {
+  busboy.on("file", (fieldname, file, filename) => {
     if (fieldname === "pdf") {
       formData.append("pdf", file, filename || "upload.pdf");
       fileProcessed = true;
@@ -31,12 +31,8 @@ export default async function handler(req, res) {
   busboy.on("field", (fieldname, val) => {
     if (fieldname === "user_id") {
       formData.append("user_id", val);
+      userId = val;
     }
-  });
-
-  busboy.on("error", (err) => {
-    console.error("Busboy error:", err);
-    return res.status(500).json({ error: "Error processing upload stream" });
   });
 
   busboy.on("finish", async () => {
@@ -45,18 +41,19 @@ export default async function handler(req, res) {
     }
 
     try {
-      const response = await axios.post(SERVER_URL, formData, {
+      await axios.post(SERVER_URL, formData, {
         headers: formData.getHeaders(),
         maxContentLength: Infinity,
         maxBodyLength: Infinity,
       });
 
-      return res.status(200).json(response.data);
+      return res.status(202).json({
+        message: "✅ PDF preview job started. It will be processed shortly.",
+        user_id: userId,
+      });
     } catch (err) {
-      console.error("Forwarding error:", err.response?.data || err.message);
-      return res
-        .status(500)
-        .json({ error: "Failed to upload PDF for preview" });
+      console.error("❌ Failed to forward PDF:", err.message);
+      return res.status(500).json({ error: "Failed to forward PDF" });
     }
   });
 
