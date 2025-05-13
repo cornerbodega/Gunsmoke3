@@ -4,8 +4,13 @@ const { createClient } = require("@supabase/supabase-js");
 const saveToSupabase = require("./utils/saveToSupabase");
 const crypto = require("crypto");
 const { cancelJob, createJob, isJobCancelled } = require("./utils/jobUtils");
-
+const util = require("util");
 const sendSlackMessage = require("./utils/sendToSlack.js"); // adjust path if needed
+const { PassThrough } = require("stream");
+const { GoogleAuth } = require("google-auth-library");
+
+const { google } = require("googleapis");
+const compute = google.compute("beta");
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -53,11 +58,18 @@ function setupGoogleCredentialsFromBase64() {
 
 setupGoogleCredentialsFromBase64(); // 🧠 MUST be before using any GCP clients
 
+const credsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+const rawCreds = fs.readFileSync(credsPath, "utf8");
+const parsed = JSON.parse(rawCreds);
+console.log("🔑 Parsed service account email:", parsed.client_email);
+console.log("🔑 Project ID from credentials:", parsed.project_id);
+
 const textToSpeech = require("@google-cloud/text-to-speech");
 const client = new textToSpeech.TextToSpeechClient();
 const { Storage } = require("@google-cloud/storage");
 const { log } = require("console");
 const storage = new Storage();
+const bucket = storage.bucket(process.env.GCS_BUCKET_NAME);
 
 const app = express();
 const port = 3001;
@@ -505,6 +517,7 @@ MR. SHERBORNE: May it please your Lordship, I appear with Ms. Laws and Ms. Wilso
         structuredLines,
         gcsPath,
         pdfUrl,
+        scene_id: newSceneId,
         sessionId,
         sampleInput,
         sampleOutput,
@@ -1572,16 +1585,32 @@ app.post("/convert", upload.single("video"), (req, res) => {
     .outputOptions(["-movflags +faststart", "-pix_fmt yuv420p", "-r 30"])
     // .on("start", (cmd) => console.log("🎬 FFmpeg started:", cmd))
     // .on("stderr", (line) => console.log("🧪 FFmpeg stderr:", line))
-    .on("end", () => {
+    .on("end", async () => {
       console.log(`✅ Conversion finished: ${outputPath}`);
       sendSlackMessage(
         `FFmpeg success: ${outputPath}`,
         "success",
         "courtroom-scene-logs"
       );
+
+      // ✅ Upload to GCS under /video/
+      const gcsVideoPath = `video/${folderName}/${outputFileName}`;
+      const videoBuffer = fs.readFileSync(outputPath);
+      const videoUrl = await uploadToGCS(
+        videoBuffer,
+        gcsVideoPath,
+        "video/mp4"
+      );
+
+      console.log(`☁️ Video uploaded to GCS: ${videoUrl}`);
+
+      // Optional: delete local file
       fs.unlinkSync(inputPath);
-      res.json({ message: "Video segment converted and saved" });
+      fs.unlinkSync(outputPath);
+
+      res.json({ message: "Video segment converted and uploaded", videoUrl });
     })
+
     .on("error", (err) => {
       console.error("❌ FFmpeg error:", err.message || err);
       sendSlackMessage(
@@ -1965,7 +1994,155 @@ app.post("/cancel-job", async (req, res) => {
   }
 });
 
-const util = require("util");
+app.delete("/videos/:sceneId", async (req, res) => {
+  const { sceneId } = req.params;
+  const { type } = req.query; // optional ?type=raw
+
+  if (!sceneId) return res.status(400).json({ error: "Missing sceneId" });
+
+  try {
+    // Fetch matching videos
+    const { data: videos, error: fetchErr } = await supabase
+      .from("gs3_videos")
+      .select("id, gcs_path")
+      .eq("scene_id", sceneId)
+      .maybeSingle();
+
+    if (fetchErr) {
+      console.error("❌ Failed to fetch videos:", fetchErr.message);
+      return res.status(500).json({ error: "Failed to fetch videos" });
+    }
+
+    // Filter by type if provided
+    const filteredVideos = type
+      ? videos.filter((v) => v.video_type === type)
+      : videos;
+
+    if (!filteredVideos.length) {
+      return res.status(404).json({ message: "No matching videos found." });
+    }
+
+    // Delete from GCS
+    const deletePromises = filteredVideos.map((v) =>
+      storage.bucket(process.env.GCS_BUCKET_NAME).file(v.gcs_path).delete()
+    );
+    await Promise.allSettled(deletePromises);
+
+    // Delete from Supabase
+    const { error: deleteErr } = await supabase
+      .from("gs3_videos")
+      .delete()
+      .in(
+        "id",
+        filteredVideos.map((v) => v.id)
+      );
+
+    if (deleteErr) {
+      console.error("❌ Failed to delete Supabase records:", deleteErr.message);
+      return res
+        .status(500)
+        .json({ error: "GCS deleted, but Supabase cleanup failed." });
+    }
+
+    console.log(
+      `🧹 Deleted ${filteredVideos.length} videos from scene ${sceneId}`
+    );
+    res.json({ message: "Videos deleted", count: filteredVideos.length });
+  } catch (err) {
+    console.error("❌ Cleanup error:", err.message);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+app.post("/stitch-videos/:sceneId", async (req, res) => {
+  const { sceneId } = req.params;
+  const project = "missions-server";
+  const zone = "us-central1-a";
+  const templateName = "video-stitch-template";
+  const instanceName = `stitch-job-${sceneId}-${Date.now()}`;
+
+  try {
+    const auth = new GoogleAuth({
+      scopes: ["https://www.googleapis.com/auth/cloud-platform"],
+    });
+
+    const authClient = await auth.getClient();
+    const accessToken = await authClient.getAccessToken();
+
+    const templateUrl = `https://www.googleapis.com/compute/v1/projects/${project}/regions/us-central1/instanceTemplates/${templateName}`;
+    const url = `https://compute.googleapis.com/compute/v1/projects/${project}/zones/${zone}/instances?sourceInstanceTemplate=${templateUrl}`;
+
+    const payload = {
+      name: instanceName,
+      metadata: {
+        items: [{ key: "scene-id", value: sceneId }],
+      },
+    };
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken.token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      throw new Error(`GCP returned ${response.status}: ${errorBody}`);
+    }
+
+    const data = await response.json();
+
+    console.log(`✅ VM created: ${instanceName}`);
+    res.json({
+      message: `✅ VM created: ${instanceName}`,
+      instance: instanceName,
+      gcpOperation: data.name,
+    });
+  } catch (err) {
+    console.error("❌ VM launch failed:", err.message);
+    res.status(500).json({
+      error: "Failed to launch stitching VM",
+      details: err.message,
+    });
+  }
+});
+
+app.get("/get-stitched-video/:sceneId", async (req, res) => {
+  const { sceneId } = req.params;
+
+  if (!sceneId) {
+    return res.status(400).json({ error: "Missing sceneId" });
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from("gs3_videos")
+      .select("*")
+      .eq("scene_id", sceneId)
+      .eq("video_type", "stitched")
+      .order("created_at", { ascending: false })
+      .limit(1);
+
+    if (error) {
+      console.error("❌ Supabase query error:", error.message);
+      return res.status(500).json({ error: "Supabase error" });
+    }
+
+    const video = data?.[0]; // data is an array
+
+    if (!video || !video.video_url) {
+      return res.status(404).json({ error: "Stitched video not found yet." });
+    }
+
+    return res.status(200).json({ video_url: video.video_url });
+  } catch (err) {
+    console.error("❌ Backend error:", err.message);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
 
 ["log", "info", "warn", "error"].forEach((method) => {
   const original = console[method];

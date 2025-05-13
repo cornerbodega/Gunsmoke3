@@ -1,11 +1,6 @@
 // utils/slack.js
 export async function sendSlackMessage(message) {
-  return console.log(
-    "sendSlackMessage disabled for quota",
-    message,
-    level,
-    channel
-  );
+  return console.log("sendSlackMessage disabled for quota");
   // try {
   //   const response = await fetch("/api/slack", {
   //     method: "POST",

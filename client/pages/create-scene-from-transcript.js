@@ -105,7 +105,7 @@ export default function CreateScene() {
         gcsPath,
         pdf_percent: pdfPercent,
         user_id: user.id,
-        scene_id: previewData?.sessionId,
+        scene_id: previewData?.scene_id,
       }),
     });
 
@@ -113,6 +113,7 @@ export default function CreateScene() {
 
     if (res.ok) {
       setStatusMessage("✅ Scene processing complete!");
+      setPhase(null); // hide cancel button
     } else {
       setStatusMessage("❌ Processing failed. Check logs.");
     }
@@ -211,25 +212,28 @@ export default function CreateScene() {
         </div>
       )}
 
-      <div style={{ marginBottom: "20px" }}>
-        <label htmlFor="pdfPercent">
-          How much of the PDF to use: {pdfPercent}%
-        </label>
-        <input
-          type="range"
-          min="1"
-          max="100"
-          value={pdfPercent}
-          onChange={(e) => setPdfPercent(Number(e.target.value))}
-          id="pdfPercent"
-          disabled={phase === "processing"}
-          style={{
-            width: "100%",
-            marginTop: "8px",
-            accentColor: "#39ff14",
-          }}
-        />
-      </div>
+      {previewData && phase !== "processing" && (
+        <div style={{ marginBottom: "20px" }}>
+          <label htmlFor="pdfPercent">
+            How much of the PDF to use: {pdfPercent}%
+            {/* {JSON.stringify(previewData)} */}
+          </label>
+          <input
+            type="range"
+            min="1"
+            max="100"
+            value={pdfPercent}
+            onChange={(e) => setPdfPercent(Number(e.target.value))}
+            id="pdfPercent"
+            disabled={phase === "processing"}
+            style={{
+              width: "100%",
+              marginTop: "8px",
+              accentColor: "#39ff14",
+            }}
+          />
+        </div>
+      )}
 
       {phase && (
         <div style={{ marginBottom: "20px" }}>
@@ -324,7 +328,7 @@ export default function CreateScene() {
           </div>
         </>
       )}
-      {phase === "processing" && (
+      {phase === "processing" && uploadProgress < 100 && (
         <button
           onClick={handleCancel}
           style={{
