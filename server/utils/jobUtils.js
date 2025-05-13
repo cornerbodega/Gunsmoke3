@@ -1,14 +1,22 @@
 const { createClient } = require("@supabase/supabase-js");
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
-);
+function getSupabaseClient() {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL?.trim();
+  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY?.trim();
+
+  if (!url || !key) {
+    throw new Error("❌ Missing Supabase credentials");
+  }
+
+  return createClient(url, key);
+}
 
 /**
  * Add a new job entry in the gs3_jobs table.
  */
 async function createJob({ job_id, scene_id = null, user_id }) {
+  const supabase = getSupabaseClient();
+
   const { error } = await supabase.from("gs3_jobs").insert({
     job_id,
     scene_id,
@@ -29,6 +37,8 @@ async function createJob({ job_id, scene_id = null, user_id }) {
  * Check whether a job has been marked as cancelled.
  */
 async function isJobCancelled(job_id) {
+  const supabase = getSupabaseClient();
+
   const { data, error } = await supabase
     .from("gs3_jobs")
     .select("status")
@@ -50,6 +60,8 @@ async function isJobCancelled(job_id) {
  * Mark a job as cancelled.
  */
 async function cancelJob(job_id) {
+  const supabase = getSupabaseClient();
+
   const { error } = await supabase
     .from("gs3_jobs")
     .update({
