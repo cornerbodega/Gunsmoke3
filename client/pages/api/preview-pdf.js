@@ -1,12 +1,13 @@
 // pages/api/preview-pdf.js
-import { formidable } from "formidable";
-import fs from "fs";
-import path from "path";
-import FormData from "form-data";
+import { IncomingForm } from "formidable";
+import Busboy from "busboy";
 import axios from "axios";
+import FormData from "form-data";
 
 export const config = {
-  api: { bodyParser: false },
+  api: {
+    bodyParser: false, // required to handle streams manually
+  },
 };
 
 const SERVER_URL = `${process.env.NEXT_PUBLIC_SERVER_URL}/preview-pdf`;
@@ -16,48 +17,52 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Only POST allowed" });
   }
 
-  const uploadDir = path.join(process.cwd(), "tmp");
-  fs.mkdirSync(uploadDir, { recursive: true });
+  const busboy = Busboy({ headers: req.headers });
+  const formData = new FormData();
 
-  const form = formidable({
-    uploadDir,
-    keepExtensions: true,
-    maxFileSize: 200 * 1024 * 1024,
-    allowEmptyFiles: false,
-    multiples: false,
+  let userId = null;
+
+  let fileProcessed = false;
+
+  busboy.on("file", (fieldname, file, filename, encoding, mimetype) => {
+    if (fieldname === "pdf") {
+      formData.append("pdf", file, { filename, contentType: mimetype });
+      fileProcessed = true;
+    }
   });
 
-  form.parse(req, async (err, fields, files) => {
-    if (err) {
-      console.error("Form parse error:", err);
-      return res.status(500).json({ error: "Failed to parse uploaded file" });
+  busboy.on("field", (fieldname, val) => {
+    if (fieldname === "user_id") {
+      userId = val;
+      formData.append("user_id", val);
+    }
+  });
+
+  busboy.on("error", (err) => {
+    console.error("Busboy error:", err);
+    return res.status(500).json({ error: "Error processing upload stream" });
+  });
+
+  busboy.on("finish", async () => {
+    if (!fileProcessed) {
+      return res.status(400).json({ error: "PDF file is required" });
     }
 
-    const file = files.pdf;
-    const filePath = Array.isArray(file) ? file[0].filepath : file.filepath;
-    const filename = Array.isArray(file)
-      ? file[0].originalFilename
-      : file.originalFilename;
     try {
-      const fileBuffer = fs.readFileSync(filePath);
-      const formData = new FormData();
-      formData.append("pdf", fileBuffer, filename);
-      formData.append("user_id", fields.user_id?.[0] || fields.user_id); // ✅ forward user_id
-
       const response = await axios.post(SERVER_URL, formData, {
-        headers: { ...formData.getHeaders() },
+        headers: formData.getHeaders(),
         maxContentLength: Infinity,
         maxBodyLength: Infinity,
       });
 
-      fs.unlinkSync(filePath);
-
       return res.status(200).json(response.data);
     } catch (err) {
-      console.error("Forwarding error:", err.response?.data || err.message);
+      console.error("Upload error:", err.response?.data || err.message);
       return res
         .status(500)
         .json({ error: "Failed to upload PDF for preview" });
     }
   });
+
+  req.pipe(busboy);
 }
