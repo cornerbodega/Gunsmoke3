@@ -13,7 +13,7 @@ const { google } = require("googleapis");
 const compute = google.compute("beta");
 
 console.log(`NEXT_PUBLIC_SUPABASE_URL`);
-console.log(NEXT_PUBLIC_SUPABASE_URL);
+console.log(process.env.NEXT_PUBLIC_SUPABASE_URL);
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
