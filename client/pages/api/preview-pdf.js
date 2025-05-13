@@ -23,10 +23,7 @@ export default async function handler(req, res) {
 
   busboy.on("file", (fieldname, file, filename, encoding, mimetype) => {
     if (fieldname === "pdf") {
-      formData.append("pdf", file, {
-        filename: filename || "upload.pdf",
-        contentType: mimetype || "application/pdf",
-      });
+      formData.append("pdf", file, filename || "upload.pdf");
       fileProcessed = true;
     }
   });
