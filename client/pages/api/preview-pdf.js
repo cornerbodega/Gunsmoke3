@@ -1,7 +1,8 @@
-// pages/api/preview-pdf.js
-import Busboy from "busboy";
-import axios from "axios";
+import formidable from "formidable";
+import { IncomingForm } from "formidable";
 import FormData from "form-data";
+import { PassThrough } from "stream";
+import axios from "axios";
 
 export const config = {
   api: {
@@ -9,53 +10,54 @@ export const config = {
   },
 };
 
-const SERVER_URL = `${process.env.NEXT_PUBLIC_SERVER_URL}/preview-pdf`;
-
 export default async function handler(req, res) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Only POST method allowed" });
-  }
+  console.log("🔥 /api/preview-pdf route hit");
 
-  const busboy = Busboy({ headers: req.headers });
-  const formData = new FormData();
-  let fileProcessed = false;
-  let userId = null;
+  const buffers = [];
+  let fileInfo = null;
 
-  busboy.on("file", (fieldname, file, filename) => {
-    if (fieldname === "pdf") {
-      formData.append("pdf", file, filename || "upload.pdf");
-      fileProcessed = true;
-    }
+  const form = new IncomingForm({
+    fileWriteStreamHandler: () => {
+      const stream = new PassThrough();
+      stream.on("data", (chunk) => buffers.push(chunk));
+      return stream;
+    },
   });
 
-  busboy.on("field", (fieldname, val) => {
-    if (fieldname === "user_id") {
-      formData.append("user_id", val);
-      userId = val;
+  form.parse(req, async (err, fields, files) => {
+    if (err) {
+      console.error("❌ Parse error:", err);
+      return res.status(500).json({ error: "Upload failed" });
     }
-  });
 
-  busboy.on("finish", async () => {
-    if (!fileProcessed) {
-      return res.status(400).json({ error: "PDF file is required" });
-    }
+    const userId = Array.isArray(fields.user_id)
+      ? fields.user_id[0]
+      : fields.user_id;
+
+    // Sometimes you need to manually attach this
+    fileInfo = files.pdf || Object.values(files)[0];
+    const buffer = Buffer.concat(buffers);
+
+    const formData = new FormData();
+    formData.append("user_id", userId);
+    formData.append("pdf", buffer, {
+      filename: fileInfo.originalFilename || "upload.pdf",
+      contentType: fileInfo.mimetype || "application/pdf",
+    });
 
     try {
-      await axios.post(SERVER_URL, formData, {
-        headers: formData.getHeaders(),
-        maxContentLength: Infinity,
-        maxBodyLength: Infinity,
-      });
+      const result = await axios.post(
+        `${process.env.NEXT_PUBLIC_SERVER_URL}/preview-pdf`,
+        formData,
+        {
+          headers: formData.getHeaders(),
+        }
+      );
 
-      return res.status(202).json({
-        message: "✅ PDF preview job started. It will be processed shortly.",
-        user_id: userId,
-      });
-    } catch (err) {
-      console.error("❌ Failed to forward PDF:", err.message);
-      return res.status(500).json({ error: "Failed to forward PDF" });
+      res.status(200).json(result.data);
+    } catch (e) {
+      console.error("❌ Error forwarding to server:", e.message);
+      res.status(500).json({ error: "Forwarding failed" });
     }
   });
-
-  req.pipe(busboy);
 }

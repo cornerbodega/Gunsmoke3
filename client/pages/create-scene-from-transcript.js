@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef } from "react";
+
+import RequireAuth from "../components/RequireAuth";
 import Link from "next/link";
 import { useUser } from "@/context/UserContext";
 import { db, ref, onChildAdded, onValue } from "@/utils/firebaseClient";
@@ -57,7 +59,11 @@ export default function CreateScene() {
 
     const formData = new FormData();
     formData.append("pdf", file);
-    formData.append("user_id", user?.id || "");
+    if (!user?.id) {
+      alert("User not signed in.");
+      return;
+    }
+    formData.append("user_id", user.id);
 
     let fakeProgress = 0;
     const interval = setInterval(() => {
@@ -183,223 +189,229 @@ export default function CreateScene() {
   }, [logs]);
 
   return (
-    <div
-      style={{
-        padding: "60px 30px",
-        maxWidth: "900px",
-        margin: "0 auto",
-        backgroundColor: "#000",
-        color: "#39ff14",
-        fontFamily: "'Source Code Pro', monospace",
-        textShadow: "0 0 5px #39ff14",
-      }}
-    >
-      <h1 style={{ fontSize: "2rem", fontWeight: "bold", marginBottom: 30 }}>
-        Upload Courtroom PDF
-      </h1>
+    <RequireAuth>
+      <div
+        style={{
+          padding: "60px 30px",
+          maxWidth: "900px",
+          margin: "0 auto",
+          backgroundColor: "#000",
+          color: "#39ff14",
+          fontFamily: "'Source Code Pro', monospace",
+          textShadow: "0 0 5px #39ff14",
+        }}
+      >
+        <h1 style={{ fontSize: "2rem", fontWeight: "bold", marginBottom: 30 }}>
+          Upload Courtroom PDF
+        </h1>
 
-      {sceneId && (
-        <div
-          style={{
-            backgroundColor: "#111",
-            padding: "16px",
-            borderRadius: "10px",
-            border: "1px solid #39ff14",
-            marginBottom: "30px",
-          }}
-        >
-          <strong>🧾 Scene ID:</strong> {sceneId} <br />
-          <Link href={`/courtroom/${sceneId}`} target="_blank">
-            <span
-              style={{
-                color: "#4EA1F3",
-                textDecoration: "underline",
-                cursor: "pointer",
-              }}
-            >
-              🔗 View Scene
-            </span>
-          </Link>
-        </div>
-      )}
-
-      {previewData && phase !== "processing" && (
-        <div style={{ marginBottom: "20px" }}>
-          <label htmlFor="pdfPercent">
-            How much of the PDF to use: {pdfPercent}%
-            {/* {JSON.stringify(previewData)} */}
-          </label>
-          <input
-            type="range"
-            min="1"
-            max="100"
-            value={pdfPercent}
-            onChange={(e) => setPdfPercent(Number(e.target.value))}
-            id="pdfPercent"
-            disabled={phase === "processing"}
-            style={{
-              width: "100%",
-              marginTop: "8px",
-              accentColor: "#39ff14",
-            }}
-          />
-        </div>
-      )}
-
-      {phase && (
-        <div style={{ marginBottom: "20px" }}>
-          <strong>{statusMessage}</strong>
+        {sceneId && (
           <div
             style={{
-              position: "relative",
-              height: "24px",
               backgroundColor: "#111",
-              borderRadius: "4px",
-              overflow: "hidden",
-              marginTop: "10px",
+              padding: "16px",
+              borderRadius: "10px",
               border: "1px solid #39ff14",
+              marginBottom: "30px",
             }}
           >
-            <div
+            <strong>🧾 Scene ID:</strong> {sceneId} <br />
+            <Link href={`/courtroom/${sceneId}`} target="_blank">
+              <span
+                style={{
+                  color: "#4EA1F3",
+                  textDecoration: "underline",
+                  cursor: "pointer",
+                }}
+              >
+                🔗 View Scene
+              </span>
+            </Link>
+          </div>
+        )}
+
+        {previewData && phase !== "processing" && (
+          <div style={{ marginBottom: "20px" }}>
+            <label htmlFor="pdfPercent">
+              How much of the PDF to use: {pdfPercent}%
+              {/* {JSON.stringify(previewData)} */}
+            </label>
+            <input
+              type="range"
+              min="1"
+              max="100"
+              value={pdfPercent}
+              onChange={(e) => setPdfPercent(Number(e.target.value))}
+              id="pdfPercent"
+              disabled={phase === "processing"}
               style={{
-                height: "100%",
-                width: `${uploadProgress}%`,
-                backgroundColor: "#39ff14",
-                transition: "width 0.3s ease",
+                width: "100%",
+                marginTop: "8px",
+                accentColor: "#39ff14",
               }}
             />
+          </div>
+        )}
+
+        {phase && (
+          <div style={{ marginBottom: "20px" }}>
+            <strong>{statusMessage}</strong>
             <div
               style={{
-                position: "absolute",
-                width: "100%",
-                textAlign: "center",
-                top: 0,
-                fontSize: "0.9rem",
+                position: "relative",
+                height: "24px",
+                backgroundColor: "#111",
+                borderRadius: "4px",
+                overflow: "hidden",
+                marginTop: "10px",
+                border: "1px solid #39ff14",
               }}
             >
-              {uploadProgress}%
+              <div
+                style={{
+                  height: "100%",
+                  width: `${uploadProgress}%`,
+                  backgroundColor: "#39ff14",
+                  transition: "width 0.3s ease",
+                }}
+              />
+              <div
+                style={{
+                  position: "absolute",
+                  width: "100%",
+                  textAlign: "center",
+                  top: 0,
+                  fontSize: "0.9rem",
+                }}
+              >
+                {uploadProgress}%
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
-      <input
-        type="file"
-        accept="application/pdf"
-        onChange={handleFileUpload}
-        disabled={isLoading}
-        style={{
-          marginBottom: "20px",
-          padding: "12px",
-          borderRadius: "6px",
-          backgroundColor: isLoading ? "#333" : "#111",
-          color: "#39ff14",
-          border: "1px solid #39ff14",
-          width: "100%",
-          cursor: isLoading ? "not-allowed" : "pointer",
-          opacity: isLoading ? 0.6 : 1,
-        }}
-      />
+        <input
+          type="file"
+          accept="application/pdf"
+          onChange={handleFileUpload}
+          disabled={isLoading}
+          style={{
+            marginBottom: "20px",
+            padding: "12px",
+            borderRadius: "6px",
+            backgroundColor: isLoading ? "#333" : "#111",
+            color: "#39ff14",
+            border: "1px solid #39ff14",
+            width: "100%",
+            cursor: isLoading ? "not-allowed" : "pointer",
+            opacity: isLoading ? 0.6 : 1,
+          }}
+        />
 
-      {previewData && phase !== "processing" && (
-        <>
+        {previewData && phase !== "processing" && (
+          <>
+            <button
+              onClick={handleProcess}
+              style={{
+                padding: "12px 24px",
+                backgroundColor: "#4EA1F3",
+                color: "#fff",
+                border: "none",
+                borderRadius: "6px",
+                cursor: "pointer",
+                fontWeight: 600,
+                marginTop: "12px",
+                marginBottom: "20px",
+              }}
+            >
+              ✅ Confirm & Process PDF
+            </button>
+
+            <div style={{ marginBottom: "30px" }}>
+              <h3 style={{ color: "#4EA1F3" }}>🧪 Preview Summary</h3>
+              <pre
+                style={{
+                  background: "#111",
+                  padding: "10px",
+                  borderRadius: "6px",
+                  border: "1px solid #333",
+                  whiteSpace: "pre-wrap",
+                  overflowX: "auto",
+                }}
+              >
+                {typeof previewData.sampleOutput === "string"
+                  ? JSON.stringify(
+                      JSON.parse(previewData.sampleOutput),
+                      null,
+                      2
+                    )
+                  : JSON.stringify(previewData.sampleOutput, null, 2)}
+              </pre>
+            </div>
+          </>
+        )}
+        {phase === "processing" && uploadProgress < 100 && (
           <button
-            onClick={handleProcess}
+            onClick={handleCancel}
             style={{
-              padding: "12px 24px",
-              backgroundColor: "#4EA1F3",
+              padding: "10px 20px",
+              backgroundColor: "#ff4d4d",
               color: "#fff",
               border: "none",
               borderRadius: "6px",
               cursor: "pointer",
               fontWeight: 600,
               marginTop: "12px",
-              marginBottom: "20px",
+              marginLeft: "12px",
             }}
           >
-            ✅ Confirm & Process PDF
+            ❌ Cancel Job
           </button>
+        )}
 
-          <div style={{ marginBottom: "30px" }}>
-            <h3 style={{ color: "#4EA1F3" }}>🧪 Preview Summary</h3>
-            <pre
-              style={{
-                background: "#111",
-                padding: "10px",
-                borderRadius: "6px",
-                border: "1px solid #333",
-                whiteSpace: "pre-wrap",
-                overflowX: "auto",
-              }}
-            >
-              {typeof previewData.sampleOutput === "string"
-                ? JSON.stringify(JSON.parse(previewData.sampleOutput), null, 2)
-                : JSON.stringify(previewData.sampleOutput, null, 2)}
-            </pre>
-          </div>
-        </>
-      )}
-      {phase === "processing" && uploadProgress < 100 && (
-        <button
-          onClick={handleCancel}
-          style={{
-            padding: "10px 20px",
-            backgroundColor: "#ff4d4d",
-            color: "#fff",
-            border: "none",
-            borderRadius: "6px",
-            cursor: "pointer",
-            fontWeight: 600,
-            marginTop: "12px",
-            marginLeft: "12px",
-          }}
-        >
-          ❌ Cancel Job
-        </button>
-      )}
-
-      <div style={{ marginTop: "40px" }}>
-        <h3 style={{ marginBottom: "10px", color: "#4EA1F3" }}>
-          📡 Real-time Logs
-        </h3>
-        <div
-          ref={logRef}
-          style={{
-            backgroundColor: "#000",
-            padding: "20px",
-            borderRadius: "10px",
-            border: "1px solid #39ff14",
-            height: "500px",
-            overflowY: "scroll",
-            fontSize: "0.9rem",
-            position: "relative",
-          }}
-        >
-          {logs.map((log, i) => (
-            <div key={i} style={{ whiteSpace: "pre-wrap" }}>
-              <span style={{ color: "#555" }}>[{log.timestamp}]</span>{" "}
-              <span style={{ color: getColor(log.type) }}>{log.message}</span>
-            </div>
-          ))}
-
-          {/* Matrix background lines */}
+        <div style={{ marginTop: "40px" }}>
+          <h3 style={{ marginBottom: "10px", color: "#4EA1F3" }}>
+            📡 Real-time Logs
+          </h3>
           <div
+            ref={logRef}
             style={{
-              position: "absolute",
-              top: 0,
-              left: 0,
-              right: 0,
-              height: "100%",
-              pointerEvents: "none",
-              backgroundImage:
-                "linear-gradient(rgba(0,255,0,0.08) 1px, transparent 1px)",
-              backgroundSize: "100% 22px",
-              opacity: 0.15,
+              backgroundColor: "#000",
+              padding: "20px",
+              borderRadius: "10px",
+              border: "1px solid #39ff14",
+              height: "500px",
+              overflowY: "scroll",
+              fontSize: "0.9rem",
+              position: "relative",
             }}
-          />
+          >
+            {logs.map((log, i) => (
+              <div key={i} style={{ whiteSpace: "pre-wrap" }}>
+                <span style={{ color: "#555" }}>[{log.timestamp}]</span>{" "}
+                <span style={{ color: getColor(log.type) }}>{log.message}</span>
+              </div>
+            ))}
+
+            {/* Matrix background lines */}
+            <div
+              style={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                right: 0,
+                height: "100%",
+                pointerEvents: "none",
+                backgroundImage:
+                  "linear-gradient(rgba(0,255,0,0.08) 1px, transparent 1px)",
+                backgroundSize: "100% 22px",
+                opacity: 0.15,
+              }}
+            />
+          </div>
         </div>
       </div>
-    </div>
+    </RequireAuth>
   );
 }
 
