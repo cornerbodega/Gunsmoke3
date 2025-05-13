@@ -433,7 +433,7 @@ export default function CourtroomScene({
         formData.append("sceneId", sceneId);
         formData.append("folderName", folderName);
         try {
-          fetch("http://localhost:3001/convert", {
+          fetch(`http://${process.env.NEXT_PUBLIC_SERVER_URL}/convert`, {
             method: "POST",
             body: formData,
           });
@@ -1674,7 +1674,7 @@ function JudgeIntroAnimation({
           formData.append("folderName", folderName);
 
           try {
-            fetch("http://localhost:3001/convert", {
+            fetch(`http://${process.env.NEXT_PUBLIC_SERVER_URL}/convert`, {
               method: "POST",
               body: formData,
             });

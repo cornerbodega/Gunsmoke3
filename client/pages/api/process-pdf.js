@@ -8,7 +8,7 @@ export default async function handler(req, res) {
 
   try {
     const response = await axios.post(
-      "http://localhost:3001/process-pdf",
+      `http://${process.env.NEXT_PUBLIC_SERVER_URL}/process-pdf`,
       req.body,
       {
         headers: {
