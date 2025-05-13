@@ -434,6 +434,31 @@ ${JSON.stringify(speakerMap)}
 
 app.post("/process-pdf", async (req, res) => {
   try {
+    const { user_id: userId, scene_id: sceneId, gcsPath } = req.body;
+
+    // Generate a sessionId or use one provided
+    const sessionId = crypto.randomUUID();
+
+    // 🔁 Kick off long process without blocking response
+    setTimeout(() => {
+      processPdfInBackground({ userId, sceneId, gcsPath, sessionId }).catch(
+        (err) => console.error("❌ Background processing failed:", err)
+      );
+    }, 0);
+
+    // ✅ Respond immediately
+    res.json({
+      message: "Processing started in background",
+      sceneId,
+      sessionId,
+    });
+  } catch (err) {
+    console.error("❌ Immediate error in /process-pdf:", err.message);
+    res.status(500).json({ error: "Failed to start processing" });
+  }
+});
+async function processPdfInBackground({ userId, sceneId, gcsPath, sessionId }) {
+  try {
     console.log("📥 Received PDF upload...");
     const userId = req.body.user_id || "unknown_user";
     logToFirebase(userId, "info", "📥 Starting full PDF processing...");
@@ -684,7 +709,7 @@ app.post("/process-pdf", async (req, res) => {
     );
     res.status(500).json({ error: "Failed to parse PDF" });
   }
-});
+}
 
 async function assignZones(sceneId, startLineId = 0, endLineId = Infinity) {
   try {
