@@ -425,6 +425,7 @@ export default function CourtroomScene({
         combinedStreamRef.current.getTracks().forEach((t) => t.stop());
         combinedStreamRef.current = null;
       }
+
       if (blob) {
         const formData = new FormData();
         formData.append("video", blob, `scene_segment_${line_id}.webm`);
