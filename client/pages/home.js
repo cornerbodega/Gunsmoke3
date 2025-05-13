@@ -2,6 +2,7 @@ import Link from "next/link";
 import RequireAuth from "../components/RequireAuth";
 import { useUser } from "@/context/UserContext";
 import { supabase } from "@/utils/supabase";
+
 export default function Home() {
   const user = useUser();
   console.log(`user?.id: ${user?.id}`);
@@ -11,10 +12,10 @@ export default function Home() {
     if (error) {
       console.error("Logout failed:", error.message);
     } else {
-      // Optionally redirect to landing/login page
       window.location.href = "/";
     }
   }
+
   return (
     <RequireAuth>
       <div
@@ -30,6 +31,12 @@ export default function Home() {
           textAlign: "center",
         }}
       >
+        <img
+          src="/logo.png"
+          alt="Gunsmoke3D Logo"
+          style={{ width: "100px", marginBottom: "1.5rem" }}
+        />
+
         <div>
           <h1
             style={{
@@ -89,13 +96,6 @@ export default function Home() {
             </div>
           </Link>
 
-          {/* Uncomment when Courtroom is ready */}
-          {/* <Link href="/courtroom">
-          <div style={{ ...buttonStyle, backgroundColor: "#2563eb" }}>
-            ⚖️ Enter the Courtroom
-          </div>
-        </Link> */}
-
           <Link href="/scenes">
             <div
               style={{
@@ -119,12 +119,12 @@ export default function Home() {
               🎥 View Scenes
             </div>
           </Link>
+
           <div style={{ marginTop: "1rem" }}>
             <button onClick={handleLogout}>Log Out</button>
           </div>
         </div>
 
-        {/* Keyframe style for pulse animation */}
         <style jsx>{`
           @keyframes pulse {
             0% {

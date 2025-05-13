@@ -2,6 +2,7 @@
 import { useEffect } from "react";
 import { useRouter } from "next/router";
 import { supabase } from "@/utils/supabase";
+
 export default function IndexPage() {
   const router = useRouter();
 
@@ -45,11 +46,31 @@ export default function IndexPage() {
         justifyContent: "center",
         alignItems: "center",
         flexDirection: "column",
+        padding: "2rem",
+        textAlign: "center",
       }}
     >
-      <h1 style={{ fontSize: "3rem", marginBottom: "2rem" }}>
+      <img
+        src="/logo.png"
+        alt="Gunsmoke3D Logo"
+        style={{ width: "120px", marginBottom: "1.5rem" }}
+      />
+      <h1 style={{ fontSize: "3rem", marginBottom: "1rem" }}>
         Welcome to Gunsmoke3D
       </h1>
+      <p
+        style={{
+          maxWidth: "600px",
+          marginBottom: "2rem",
+          fontSize: "1.1rem",
+          lineHeight: "1.5",
+        }}
+      >
+        Gunsmoke3D is a cutting-edge platform that transforms courtroom
+        transcripts into dynamic, downloadable 3D-rendered video recreations.
+        Upload PDF transcripts, generate visual narratives, and bring justice to
+        life like never before.
+      </p>
       <button
         onClick={signInWithGoogle}
         style={{
