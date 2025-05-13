@@ -1,6 +1,9 @@
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useUser } from "@/context/UserContext";
+import { db, ref, onChildAdded, onValue } from "@/utils/firebaseClient";
+import { onDisconnect, ref as dbRef } from "firebase/database";
+import { query, orderByKey } from "firebase/database";
 
 export default function CreateScene() {
   const [logs, setLogs] = useState([]);
@@ -93,6 +96,46 @@ export default function CreateScene() {
     xhr.send(formData);
   };
 
+  const connectedRef = dbRef(db, ".info/connected");
+  onValue(connectedRef, (snap) => {
+    console.log("🧬 Firebase connection state:", snap.val());
+  });
+
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const logsRef = ref(db, `logs/${user.id}/latest/entries`);
+
+    onValue(logsRef, (snapshot) => {
+      const data = snapshot.val();
+      if (!data) return;
+
+      const logsArray = Object.values(data);
+      const latestLog = logsArray.at(-1);
+
+      if (!latestLog) return;
+
+      // ✅ Detect and set scene ID
+      if (
+        latestLog.type === "scene_id" &&
+        typeof latestLog.message === "string"
+      ) {
+        setSceneId(latestLog.message);
+      }
+
+      // ✅ Detect and set progress
+      if (
+        latestLog.type === "progress" &&
+        typeof latestLog.percent === "number"
+      ) {
+        setUploadProgress(Math.round(latestLog.percent));
+      }
+
+      // ✅ Set all logs
+      setLogs((prev) => [...prev.slice(-300), latestLog]);
+    });
+  }, [user?.id]);
+
   const handleProcess = async () => {
     setPhase("processing");
     setUploadProgress(0);
@@ -129,79 +172,6 @@ export default function CreateScene() {
     el.addEventListener("scroll", handleScroll);
     return () => el.removeEventListener("scroll", handleScroll);
   }, []);
-  useEffect(() => {
-    let ws;
-    let reconnectTimeout;
-
-    const connect = () => {
-      const rawUrl =
-        process.env.NODE_ENV === "development"
-          ? "localhost:8080/ws"
-          : `${window.location.host}/ws`;
-
-      const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-      const ws = new WebSocket(`${protocol}://${rawUrl}`);
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          setLogs((prev) => [...prev.slice(-300), data]);
-        } catch (err) {
-          console.error("❌ WS parse error:", err.message);
-        }
-      };
-
-      ws.onclose = () => {
-        console.warn("🔁 WebSocket closed. Reconnecting in 2s...");
-        reconnectTimeout = setTimeout(connect, 2000);
-      };
-    };
-
-    connect();
-    return () => {
-      clearTimeout(reconnectTimeout);
-      ws?.close();
-    };
-  }, []);
-
-  useEffect(() => {
-    // Strip protocol if present
-    const rawUrl =
-      process.env.NODE_ENV === "development"
-        ? "localhost:8080/ws"
-        : `${window.location.host}/ws`;
-
-    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-    const ws = new WebSocket(`${protocol}://${rawUrl}`);
-
-    ws.onmessage = (event) => {
-      try {
-        const payload = event.data.trim();
-
-        if (payload.startsWith("event: progress")) {
-          const json = JSON.parse(payload.split("\n")[1].replace("data: ", ""));
-          const raw = json.percent || 0;
-          const scaled = Math.min(100, Math.round((raw / pdfPercent) * 100));
-          setUploadProgress(
-            phase === "processing" && pdfPercent > 0 ? scaled : raw
-          );
-        } else if (payload.startsWith("event: scene_id")) {
-          const json = JSON.parse(payload.split("\n")[1].replace("data: ", ""));
-          setSceneId(json.message);
-        } else {
-          const data = JSON.parse(payload.replace(/^data:\s*/, ""));
-          setLogs((prev) => [...prev.slice(-300), data]);
-        }
-      } catch (err) {
-        console.error("❌ Failed to parse WS log message:", err.message);
-      }
-    };
-
-    ws.onerror = (err) => {
-      console.error("WebSocket error:", err);
-    };
-
-    return () => ws.close();
-  }, [phase, pdfPercent]);
 
   useEffect(() => {
     const el = logRef.current;
