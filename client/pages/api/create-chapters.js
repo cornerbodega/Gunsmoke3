@@ -13,7 +13,7 @@ export default async function handler(req, res) {
 
   try {
     const response = await fetch(
-      "http://${process.env.NEXT_PUBLIC_SERVER_URL}/create-chapters",
+      "${process.env.NEXT_PUBLIC_SERVER_URL}/create-chapters",
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },

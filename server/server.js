@@ -2146,6 +2146,36 @@ app.get("/get-stitched-video/:sceneId", async (req, res) => {
   }
 });
 
+const http = require("http");
+const WebSocket = require("ws");
+
+// Replace app.listen(...) with this:
+const server = http.createServer(app);
+const wss = new WebSocket.Server({ server, path: "/ws" }); // ✅ Explicit WS path
+
+// Keep track of clients
+const wsClients = new Set();
+
+wss.on("connection", (ws) => {
+  wsClients.add(ws);
+  console.log("🔌 New WebSocket client connected.");
+
+  ws.on("close", () => {
+    wsClients.delete(ws);
+    console.log("❌ WebSocket client disconnected.");
+  });
+});
+
+// Replace your sendToClients function with this:
+function sendToClients(data) {
+  const payload = JSON.stringify(data);
+  for (const client of wsClients) {
+    if (client.readyState === WebSocket.OPEN) {
+      client.send(payload);
+    }
+  }
+}
+
 ["log", "info", "warn", "error"].forEach((method) => {
   const original = console[method];
   console[method] = (...args) => {
@@ -2155,7 +2185,20 @@ app.get("/get-stitched-video/:sceneId", async (req, res) => {
     original(`[${timestamp}]`, ...args);
   };
 });
+wss.on("connection", (ws) => {
+  wsClients.add(ws);
+  console.log("🔌 New WebSocket client connected.");
 
-app.listen(port, () => {
+  ws.on("message", (msg) => {
+    console.log(`📩 Received from client: ${msg}`);
+  });
+
+  ws.on("close", () => {
+    wsClients.delete(ws);
+    console.log("❌ WebSocket client disconnected.");
+  });
+});
+
+server.listen(port, () => {
   console.log(`✅ PDF parser server running on http://localhost:${port}`);
 });

@@ -129,37 +129,78 @@ export default function CreateScene() {
     el.addEventListener("scroll", handleScroll);
     return () => el.removeEventListener("scroll", handleScroll);
   }, []);
+  useEffect(() => {
+    let ws;
+    let reconnectTimeout;
+
+    const connect = () => {
+      const rawUrl =
+        process.env.NODE_ENV === "development"
+          ? "localhost:8080/ws"
+          : `${window.location.host}/ws`;
+
+      const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+      const ws = new WebSocket(`${protocol}://${rawUrl}`);
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          setLogs((prev) => [...prev.slice(-300), data]);
+        } catch (err) {
+          console.error("❌ WS parse error:", err.message);
+        }
+      };
+
+      ws.onclose = () => {
+        console.warn("🔁 WebSocket closed. Reconnecting in 2s...");
+        reconnectTimeout = setTimeout(connect, 2000);
+      };
+    };
+
+    connect();
+    return () => {
+      clearTimeout(reconnectTimeout);
+      ws?.close();
+    };
+  }, []);
 
   useEffect(() => {
-    const eventSource = new EventSource("/api/logs");
+    // Strip protocol if present
+    const rawUrl =
+      process.env.NODE_ENV === "development"
+        ? "localhost:8080/ws"
+        : `${window.location.host}/ws`;
 
-    eventSource.addEventListener("progress", (event) => {
-      const data = JSON.parse(event.data);
-      const raw = data.percent || 0;
+    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+    const ws = new WebSocket(`${protocol}://${rawUrl}`);
 
-      if (phase === "processing" && pdfPercent > 0) {
-        const scaled = Math.min(100, Math.round((raw / pdfPercent) * 100));
-        setUploadProgress(scaled);
-      } else {
-        setUploadProgress(raw);
+    ws.onmessage = (event) => {
+      try {
+        const payload = event.data.trim();
+
+        if (payload.startsWith("event: progress")) {
+          const json = JSON.parse(payload.split("\n")[1].replace("data: ", ""));
+          const raw = json.percent || 0;
+          const scaled = Math.min(100, Math.round((raw / pdfPercent) * 100));
+          setUploadProgress(
+            phase === "processing" && pdfPercent > 0 ? scaled : raw
+          );
+        } else if (payload.startsWith("event: scene_id")) {
+          const json = JSON.parse(payload.split("\n")[1].replace("data: ", ""));
+          setSceneId(json.message);
+        } else {
+          const data = JSON.parse(payload.replace(/^data:\s*/, ""));
+          setLogs((prev) => [...prev.slice(-300), data]);
+        }
+      } catch (err) {
+        console.error("❌ Failed to parse WS log message:", err.message);
       }
-    });
-
-    eventSource.addEventListener("scene_id", (event) => {
-      const data = JSON.parse(event.data);
-      setSceneId(data.message);
-    });
-
-    eventSource.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      setLogs((prev) => [...prev.slice(-300), data]);
     };
 
-    eventSource.onerror = (err) => {
-      console.error("SSE error:", err);
+    ws.onerror = (err) => {
+      console.error("WebSocket error:", err);
     };
 
-    return () => eventSource.close();
+    return () => ws.close();
   }, [phase, pdfPercent]);
 
   useEffect(() => {

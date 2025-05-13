@@ -1,10 +1,8 @@
+// pages/api/logs.js
 export default async function handler(req, res) {
-  const upstream = await fetch(
-    `http://${process.env.NEXT_PUBLIC_SERVER_URL}/logs`,
-    {
-      headers: { Accept: "text/event-stream" },
-    }
-  );
+  const upstream = await fetch(`${process.env.NEXT_PUBLIC_SERVER_URL}/logs`, {
+    headers: { Accept: "text/event-stream" },
+  });
 
   res.writeHead(200, {
     "Content-Type": "text/event-stream",
@@ -20,7 +18,7 @@ export default async function handler(req, res) {
       const { done, value } = await reader.read();
       if (done) break;
       res.write(decoder.decode(value));
-      res.flush?.(); // try flushing, if supported
+      res.flush?.();
     }
     res.end();
   };

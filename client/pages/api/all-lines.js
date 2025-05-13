@@ -5,7 +5,7 @@ export default async function handler(req, res) {
 
   try {
     const backendRes = await fetch(
-      `http://${process.env.NEXT_PUBLIC_SERVER_URL}/api/lines/all?sceneId=${sceneId}`
+      `${process.env.NEXT_PUBLIC_SERVER_URL}/api/lines/all?sceneId=${sceneId}`
     );
     const data = await backendRes.json();
     res.status(200).json(data);
