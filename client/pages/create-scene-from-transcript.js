@@ -1,6 +1,9 @@
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useUser } from "@/context/UserContext";
+import { db, ref, onChildAdded, onValue } from "@/utils/firebaseClient";
+import { onDisconnect, ref as dbRef } from "firebase/database";
+import { query, orderByKey } from "firebase/database";
 
 export default function CreateScene() {
   const [logs, setLogs] = useState([]);
@@ -93,6 +96,46 @@ export default function CreateScene() {
     xhr.send(formData);
   };
 
+  const connectedRef = dbRef(db, ".info/connected");
+  onValue(connectedRef, (snap) => {
+    console.log("🧬 Firebase connection state:", snap.val());
+  });
+
+  useEffect(() => {
+    if (!user?.id) return;
+
+    const logsRef = ref(db, `logs/${user.id}/latest/entries`);
+
+    onValue(logsRef, (snapshot) => {
+      const data = snapshot.val();
+      if (!data) return;
+
+      const logsArray = Object.values(data);
+      const latestLog = logsArray.at(-1);
+
+      if (!latestLog) return;
+
+      // ✅ Detect and set scene ID
+      if (
+        latestLog.type === "scene_id" &&
+        typeof latestLog.message === "string"
+      ) {
+        setSceneId(latestLog.message);
+      }
+
+      // ✅ Detect and set progress
+      if (
+        latestLog.type === "progress" &&
+        typeof latestLog.percent === "number"
+      ) {
+        setUploadProgress(Math.round(latestLog.percent));
+      }
+
+      // ✅ Set all logs
+      setLogs((prev) => [...prev.slice(-300), latestLog]);
+    });
+  }, [user?.id]);
+
   const handleProcess = async () => {
     setPhase("processing");
     setUploadProgress(0);
@@ -129,38 +172,6 @@ export default function CreateScene() {
     el.addEventListener("scroll", handleScroll);
     return () => el.removeEventListener("scroll", handleScroll);
   }, []);
-
-  useEffect(() => {
-    const eventSource = new EventSource("/api/logs");
-
-    eventSource.addEventListener("progress", (event) => {
-      const data = JSON.parse(event.data);
-      const raw = data.percent || 0;
-
-      if (phase === "processing" && pdfPercent > 0) {
-        const scaled = Math.min(100, Math.round((raw / pdfPercent) * 100));
-        setUploadProgress(scaled);
-      } else {
-        setUploadProgress(raw);
-      }
-    });
-
-    eventSource.addEventListener("scene_id", (event) => {
-      const data = JSON.parse(event.data);
-      setSceneId(data.message);
-    });
-
-    eventSource.onmessage = (event) => {
-      const data = JSON.parse(event.data);
-      setLogs((prev) => [...prev.slice(-300), data]);
-    };
-
-    eventSource.onerror = (err) => {
-      console.error("SSE error:", err);
-    };
-
-    return () => eventSource.close();
-  }, [phase, pdfPercent]);
 
   useEffect(() => {
     const el = logRef.current;

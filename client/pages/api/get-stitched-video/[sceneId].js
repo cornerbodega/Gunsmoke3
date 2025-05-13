@@ -10,7 +10,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const backendUrl = `http://${process.env.NEXT_PUBLIC_SERVER_URL}/get-stitched-video/${sceneId}`;
+    const backendUrl = `${process.env.NEXT_PUBLIC_SERVER_URL}/get-stitched-video/${sceneId}`;
 
     const response = await fetch(backendUrl, {
       method: "GET",

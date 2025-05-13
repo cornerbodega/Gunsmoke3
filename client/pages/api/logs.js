@@ -1,10 +1,7 @@
 export default async function handler(req, res) {
-  const upstream = await fetch(
-    `http://${process.env.NEXT_PUBLIC_SERVER_URL}/logs`,
-    {
-      headers: { Accept: "text/event-stream" },
-    }
-  );
+  const upstream = await fetch(`${process.env.NEXT_PUBLIC_SERVER_URL}/logs`, {
+    headers: { Accept: "text/event-stream" },
+  });
 
   res.writeHead(200, {
     "Content-Type": "text/event-stream",

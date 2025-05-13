@@ -66,7 +66,7 @@ async function cancelJob(job_id) {
     .from("gs3_jobs")
     .update({
       status: "cancelled",
-      cancelled_at: new Date().toISOString(),
+      cancelled_at: new Date().now(),
     })
     .eq("job_id", job_id);
 

@@ -9,7 +9,7 @@ export const config = {
   api: { bodyParser: false },
 };
 
-const SERVER_URL = `http://${process.env.NEXT_PUBLIC_SERVER_URL}/preview-pdf`;
+const SERVER_URL = `${process.env.NEXT_PUBLIC_SERVER_URL}/preview-pdf`;
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {

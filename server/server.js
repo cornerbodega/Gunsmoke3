@@ -8,7 +8,7 @@ const util = require("util");
 const sendSlackMessage = require("./utils/sendToSlack.js"); // adjust path if needed
 const { PassThrough } = require("stream");
 const { GoogleAuth } = require("google-auth-library");
-
+const { logToFirebase } = require("./utils/logToFirebase.js");
 const { google } = require("googleapis");
 const compute = google.compute("beta");
 
@@ -219,50 +219,49 @@ app.post(
   upload.fields([{ name: "pdf", maxCount: 1 }]),
   async (req, res) => {
     console.log("📥 req.body:", req.body);
-    console.log("📂 req.files:", req.files);
     const userId = req.body.user_id;
-    console.log("🔍 user_id from form:", userId);
-    try {
-      console.log(`📥 Req.body ${JSON.stringify(req.body)}`);
-      const userId = req.body.user_id || req.body["user_id"];
+    logToFirebase(userId, "info", "📥 Received PDF preview request");
+    logToFirebase(userId, "info", `🔍 user_id from form: ${userId}`);
+    console.log("📂 req.files:", req.files);
 
+    try {
+      logToFirebase(userId, "info", "📄 Parsing form data...");
       const file = req.files?.pdf?.[0];
       if (!file) throw new Error("No PDF found");
-      const user_id = req.body.user_id || req.body["user_id"];
-      console.log("🔍 user_id from form:", user_id);
 
-      if (!file) throw new Error("No PDF found");
+      logToFirebase(userId, "info", `📎 PDF file found: ${file.originalname}`);
 
-      // send initial SSE progress if you use SSE...
       sendToClients({
         type: "progress",
         message: "📥 Reading PDF file...",
         percent: 5,
         timestamp: new Date().toISOString(),
       });
+      logToFirebase(userId, "progress", "📥 Reading PDF file...");
 
       // 1.1) Create new scene
       const newSceneId = crypto.randomUUID();
       const newSceneMetadata = {
         title: `Scene preview ${newSceneId.slice(0, 8)}`,
-        summary: `Initial preview scene created by user ${user_id}`,
+        summary: `Initial preview scene created by user ${userId}`,
         created_at: new Date().toISOString(),
       };
       await saveToSupabase("gs3_scenes", {
         scene_id: newSceneId,
         scene_name: `Preview for ${newSceneId.slice(0, 8)}`,
-        user_id: userId, // ✅ Ensure this is included
-
+        user_id: userId,
         metadata: newSceneMetadata,
       });
+      logToFirebase(userId, "info", `🆕 Created new scene: ${newSceneId}`);
 
       // 1.2) Read & upload the PDF
       const sessionId = crypto.randomUUID();
       await createJob({
         job_id: sessionId,
         scene_id: newSceneId,
-        user_id,
+        user_id: userId,
       });
+      logToFirebase(userId, "info", `📌 Created job: ${sessionId}`);
 
       const buffer = fs.readFileSync(file.path);
       const gcsPath = `pdf/tmp-preview-${sessionId}.pdf`;
@@ -273,7 +272,9 @@ app.post(
         percent: 15,
         timestamp: new Date().toISOString(),
       });
+      logToFirebase(userId, "progress", `☁️ Uploading PDF to GCS: ${gcsPath}`);
       const pdfUrl = await uploadToGCS(buffer, gcsPath, "application/pdf");
+      logToFirebase(userId, "info", `✅ Uploaded to GCS: ${pdfUrl}`);
 
       // 2) Parse & chunk
       sendToClients({
@@ -282,9 +283,15 @@ app.post(
         percent: 35,
         timestamp: new Date().toISOString(),
       });
+      logToFirebase(userId, "progress", "🧠 Parsing PDF...");
       const parsed = await pdfParse(buffer);
       const chunks = splitBySpeakerAndLength(parsed.text, textChunkSize);
       const previewChunk = chunks[0];
+      logToFirebase(
+        userId,
+        "info",
+        `📑 Extracted ${chunks.length} chunks, using first for preview`
+      );
 
       // 3) Identify speakers
       sendToClients({
@@ -293,8 +300,13 @@ app.post(
         percent: 55,
         timestamp: new Date().toISOString(),
       });
+      logToFirebase(userId, "progress", "🧬 Identifying speakers...");
       if (await isJobCancelled(sessionId)) {
-        console.warn(`🚫 Job ${sessionId} was cancelled`);
+        logToFirebase(
+          userId,
+          "warn",
+          `🚫 Job ${sessionId} was cancelled during speaker ID`
+        );
         return res.status(409).json({ error: "Job cancelled." });
       }
 
@@ -302,188 +314,54 @@ app.post(
         previewChunk,
         new Map()
       );
+      logToFirebase(
+        userId,
+        "info",
+        `👥 Extracted speaker map: ${JSON.stringify(speakerMap)}`
+      );
 
-      // 4) Prepare sampleInput & full prompt
+      // 4) Prepare and send to OpenAI
       const sampleInput = previewChunk;
       const contextPrompt = `
-      You are cleaning and formatting courtroom transcript lines into structured JSON. Each line of dialog should include:
-      - character_id (use character map),
-      - role,
-      - posture,
-      - emotion,
-      - text (just the spoken text),
-      - eye_target (character_id of the person being spoken to, not the speaker. Use "audience" if unknown),
-      - pause_before (number, seconds)
+You are cleaning and formatting courtroom transcript lines into structured JSON. Each line of dialog should include:
+- character_id (use character map),
+- role,
+- posture,
+- emotion,
+- text (just the spoken text),
+- eye_target (character_id of the person being spoken to, not the speaker. Use "audience" if unknown),
+- pause_before (number, seconds)
 
-      If something is not dialog (e.g., action notes), ignore it. Use common sense to infer who’s speaking and who they’re speaking to.
+If something is not dialog (e.g., action notes), ignore it. Use common sense to infer who’s speaking and who they’re speaking to.
 
-      Speaker map:
-      ${JSON.stringify(speakerMap)}`;
+Speaker map:
+${JSON.stringify(speakerMap)}
+`;
 
-      console.log("📄 sampleInput:", sampleInput);
-      if (await isJobCancelled(sessionId)) {
-        console.warn(`🚫 Job ${sessionId} was cancelled`);
-        return res.status(409).json({ error: "Job cancelled." });
-      }
-
-      // 5) Call OpenAI with **full** messages list
+      logToFirebase(
+        userId,
+        "info",
+        "🤖 Sending to OpenAI for formatting sample..."
+      );
       const response = await openai.chat.completions.create({
         model: "gpt-4o-mini",
         messages: [
           { role: "system", content: contextPrompt },
-          {
-            role: "user",
-            content: `NGN & WOOTTON 07 JUL Claim No QB-2018-006323 IN THE HIGH COURT OF JUSTICE QUEEN'S BENCH DIVISION MEDIA AND COMMUNICATIONS LIST Royal Courts of Justice, Strand, London, WC2A 2LL Tuesday, 7th July, 2020 Before: MR. JUSTICE NICOL BETWEEN: JOHN CHRISTOPHER DEPP II Claimant – and – (1) NEWS GROUP NEWSPAPERS LIMITED (2) DAN WOOTTON Defendants (Transcript of the Stenograph Notes of Marten Walsh Cherer Limited, 2nd Floor, Quality House, 9 Quality Court, Chancery Lane, London, WC2A 1HP. Telephone No: 020 7067 2900. Fax No: 020 7831 6864. Email: info@martenwalshcherer.com. www.martenwalshcherer.com) MR. DAVID SHERBORNE, MS. ELEANOR LAWS QC and MS. KATE WILSON (instructed by Schillings) appeared for the Claimant. MS. SASHA WASS QC, MR. ADAM WOLANSKI QC and MS. CLARA HAMER (instructed by Simons Muirhead & Burton) appeared for the Defendants. PROCEEDINGS (DAY I) (TRANSCRIPT PREPARED WITHOUT ACCESS TO COURT BUNDLES)
-
---- Page 1 ---
-1 HOUSEKEEPING
-2 MR. JUSTICE NICOL: Before the trial begins, I want to say a few words by way of introduction. This is the trial of the libel action which Johnny Depp, the claimant, has brought against News Group Newspapers Limited, the publishers of The Sun, and Mr. Daniel Wootton.
-3 There are some features which the trial will have that are the same as any other trial. There are others which are necessarily different. First, the features which are common to other trials. The trial is by judge alone. There is no jury. It will be for me, Nicol J, as the judge, to make any necessary findings of fact and rule on any issues of law.
-4 Next, it will be important for there to be silence when witnesses give their evidence and when the counsel are making their submissions. Next, as with all trials in England and Wales, there may be no photography of anyone in court. That includes stills, moving pictures, sketches, or screenshots. The law also prohibits sound recordings of the court proceedings. Disregarding these restrictions can be contempt of court and can lead to imprisonment. There will be an official audio recording of the trial, which may be purchased.
-5 All mobile phones must be switched to silent. Anyone may take notes of the hearing as it continues. Journalists, but only journalists, may report live by Twitter or other similar live text platforms.
---- Page 2 ---
-1 HOUSEKEEPING (continued)
-2 COVID-19 restrictions mean social distancing must be observed: no one less than two metres from anyone else. The public gallery has been opened, but these limits mean not all lawyers or representatives can be accommodated in this court. A second courtroom has been made available for those who cannot fit here.
-3 Our press and public are free to attend in principle, but, in practice, space is limited. Three further spill‑over courts have been opened, for a total of five. They will all receive the same audio and video feed.
-4 Some witnesses will appear in court, others via video link from the USA, the Bahamas, and Australia.
-5 The trial is expected to last three weeks. We start at 10am each day, lunch at 1pm, finish at about 4:30pm. Breaks will be kept under review.
-6 To save time, opening statements will be submitted in writing.
-7 Skeleton arguments will be available from the parties’ solicitors. Neither the openings nor skeletons will refer to parts in private.
-8 Now, Mr. Sherborne.
---- Page 3 ---
-MR. SHERBORNE: May it please your Lordship, I appear with Ms. Laws and Ms. Wilson on behalf of the claimant, Johnny Depp. My learned friends Ms. Wass, Mr. Wolanski, and Ms. Hamer appear for the defendants.
-`,
-          },
-          {
-            role: "assistant",
-            content: JSON.stringify([
-              {
-                character_id: "justice_nicol",
-                role: "judge",
-                posture: "seated",
-                emotion: "neutral",
-                text: "Before the trial begins, I want to say a few words by way of introduction.",
-                eye_target: "audience",
-                pause_before: 0.5,
-              },
-              {
-                character_id: "justice_nicol",
-                role: "judge",
-                posture: "seated",
-                emotion: "neutral",
-                text: "This is the trial of the libel action which Johnny Depp, the claimant, has brought against News Group Newspapers Limited, the publishers of The Sun, and Mr. Daniel Wootton.",
-                eye_target: "audience",
-                pause_before: 0.5,
-              },
-              {
-                character_id: "justice_nicol",
-                role: "judge",
-                posture: "seated",
-                emotion: "neutral",
-                text: "There are some features which the trial will have that are the same as any other trial. There are others which are necessarily different.",
-                eye_target: "audience",
-                pause_before: 0.5,
-              },
-              {
-                character_id: "justice_nicol",
-                role: "judge",
-                posture: "seated",
-                emotion: "neutral",
-                text: "The trial is by judge alone. There is no jury.",
-                eye_target: "audience",
-                pause_before: 0.5,
-              },
-              {
-                character_id: "justice_nicol",
-                role: "judge",
-                posture: "seated",
-                emotion: "firm",
-                text: "There may be no photography, screenshots, or sound recordings in court. Breaching this can lead to imprisonment.",
-                eye_target: "audience",
-                pause_before: 0.6,
-              },
-              {
-                character_id: "justice_nicol",
-                role: "judge",
-                posture: "seated",
-                emotion: "neutral",
-                text: "COVID-19 restrictions require everyone in court to maintain a distance of at least two metres.",
-                eye_target: "audience",
-                pause_before: 0.5,
-              },
-              {
-                character_id: "justice_nicol",
-                role: "judge",
-                posture: "seated",
-                emotion: "grateful",
-                text: "I am grateful to the Court Service for arranging spill‑over courtrooms to accommodate the public and press.",
-                eye_target: "audience",
-                pause_before: 0.5,
-              },
-              {
-                character_id: "justice_nicol",
-                role: "judge",
-                posture: "seated",
-                emotion: "neutral",
-                text: "Some witnesses will give evidence in court, others via video link from the USA, the Bahamas, and Australia.",
-                eye_target: "audience",
-                pause_before: 0.5,
-              },
-              {
-                character_id: "justice_nicol",
-                role: "judge",
-                posture: "seated",
-                emotion: "neutral",
-                text: "The trial is expected to last three weeks. We will start each day's hearing at 10 a.m.",
-                eye_target: "audience",
-                pause_before: 0.5,
-              },
-              {
-                character_id: "justice_nicol",
-                role: "judge",
-                posture: "seated",
-                emotion: "neutral",
-                text: "To save time, opening statements will be submitted in writing.",
-                eye_target: "audience",
-                pause_before: 0.5,
-              },
-              {
-                character_id: "mr_sherborne",
-                role: "prosecutor",
-                posture: "standing",
-                emotion: "respectful",
-                text: "May it please your Lordship, I appear with Ms. Laws and Ms. Wilson on behalf of the claimant, Johnny Depp.",
-                eye_target: "justice_nicol",
-                pause_before: 0.5,
-              },
-              {
-                character_id: "mr_sherborne",
-                role: "prosecutor",
-                posture: "standing",
-                emotion: "neutral",
-                text: "My learned friends Ms. Wass, Mr. Wolanski, and Ms. Hamer appear for the defendants.",
-                eye_target: "justice_nicol",
-                pause_before: 0.5,
-              },
-            ]),
-          },
-          {
-            role: "user",
-            content: sampleInput,
-          },
+          { role: "user", content: sampleInput },
         ],
       });
+      logToFirebase(userId, "info", "🧾 Received sample output from OpenAI");
 
-      // 6) Handle the response
       if (!response.choices || response.choices.length === 0) {
         throw new Error("No response from OpenAI");
       }
+
       let sampleOutput = response.choices[0].message.content
         .trim()
         .replace(/^```(?:json)?\s*/i, "")
         .replace(/```$/, "")
         .trim();
-      console.log(`📦 Sample output:`, sampleOutput);
+      logToFirebase(userId, "info", "📦 Parsed OpenAI output");
 
       sendToClients({
         type: "progress",
@@ -492,17 +370,25 @@ MR. SHERBORNE: May it please your Lordship, I appear with Ms. Laws and Ms. Wilso
         timestamp: new Date().toISOString(),
       });
       if (await isJobCancelled(sessionId)) {
-        console.warn(`🚫 Job ${sessionId} was cancelled`);
+        logToFirebase(
+          userId,
+          "warn",
+          `🚫 Job ${sessionId} was cancelled before final structuring`
+        );
         return res.status(409).json({ error: "Job cancelled." });
       }
 
-      // 7) Turn that into structured JSON
       const structuredLines = await processChunk(
         previewChunk,
         speakerMap,
         [],
         sampleInput,
         sampleOutput
+      );
+      logToFirebase(
+        userId,
+        "info",
+        `✅ Structured ${structuredLines.length} lines from preview chunk`
       );
 
       sendToClients({
@@ -511,8 +397,12 @@ MR. SHERBORNE: May it please your Lordship, I appear with Ms. Laws and Ms. Wilso
         percent: 100,
         timestamp: new Date().toISOString(),
       });
+      logToFirebase(
+        userId,
+        "success",
+        `🎉 Preview process completed successfully for job ${sessionId}`
+      );
 
-      // 8) Return everything
       res.json({
         previewChunk,
         speakerMap,
@@ -523,9 +413,15 @@ MR. SHERBORNE: May it please your Lordship, I appear with Ms. Laws and Ms. Wilso
         sessionId,
         sampleInput,
         sampleOutput,
+        user_id: userId,
       });
     } catch (err) {
       console.error("❌ Preview failed:", err);
+      logToFirebase(
+        userId || "unknown",
+        "error",
+        `❌ Error during preview: ${err.message}`
+      );
       sendToClients({
         type: "error",
         message: `❌ Preview generation error: ${err.message}`,
@@ -539,33 +435,30 @@ MR. SHERBORNE: May it please your Lordship, I appear with Ms. Laws and Ms. Wilso
 app.post("/process-pdf", async (req, res) => {
   try {
     console.log("📥 Received PDF upload...");
+    const userId = req.body.user_id || "unknown_user";
+    logToFirebase(userId, "info", "📥 Starting full PDF processing...");
     sendSlackMessage(
       `📥 Received PDF upload...`,
       "info",
       "script-creation-logs"
     );
+
     const sceneId = req.body.scene_id;
     const gcsPath = req.body.gcsPath;
     const pdfUrl = `https://storage.googleapis.com/${process.env.GCS_BUCKET_NAME}/${gcsPath}`;
-
-    const userId = req.body.user_id || "unknown_user";
-    // ⬆️ Upload to GCS under "pdf/" folder
-
     console.log(`☁️ Uploaded PDF to GCS at: ${pdfUrl}`);
+    logToFirebase(
+      userId,
+      "info",
+      `☁️ Downloading PDF from GCS path: ${gcsPath}`
+    );
 
-    // const [bucketName, ...fileParts] = gcsPath.replace("pdf/", "").split("/");
-    // const filePath = `pdf/${fileParts.join("/")}`;
-    // const bucket = storage.bucket(process.env.GCS_BUCKET_NAME);
     const file = storage.bucket(process.env.GCS_BUCKET_NAME).file(gcsPath);
-
     const [buffer] = await file.download();
-    ``;
-    // fs.unlinkSync(file.path); // clean local temp file
 
-    // ⬇️ You can either use `buffer` here, or download from GCS again
     const parsed = await pdfParse(buffer);
-
     console.log("📄 PDF parsed successfully");
+    logToFirebase(userId, "info", "📄 PDF parsed successfully");
     sendSlackMessage(
       `📄 PDF Parsed Successfully.`,
       "success",
@@ -573,6 +466,8 @@ app.post("/process-pdf", async (req, res) => {
     );
 
     const chunks = splitBySpeakerAndLength(parsed.text, textChunkSize);
+    logToFirebase(userId, "info", `📦 Split PDF into ${chunks.length} chunks`);
+
     if (req.body.pdf_percent !== undefined) {
       const percent = parseFloat(req.body.pdf_percent);
       if (!isNaN(percent)) {
@@ -580,31 +475,24 @@ app.post("/process-pdf", async (req, res) => {
           percent === 100
             ? Infinity
             : Math.ceil((percent / 100) * chunks.length);
-        console.log(
-          `🔢 DEV_MAX_CHUNKS set to ${DEV_MAX_CHUNKS} based on ${percent}% slider`
+        logToFirebase(
+          userId,
+          "info",
+          `📊 Limiting to ${DEV_MAX_CHUNKS} chunks (${percent}%)`
         );
       }
     }
-    console.log(`📦 Split PDF into ${chunks.length} chunks`);
-    console.log(`req.body.pdf_percent`, req.body.pdf_percent);
-    if (req.body.pdf_percent !== undefined) {
-      const percent = parseFloat(req.body.pdf_percent);
-      if (!isNaN(percent)) {
-        DEV_MAX_CHUNKS =
-          percent === 100
-            ? Infinity
-            : Math.ceil((percent / 100) * chunks.length);
-        console.log(
-          `🔢 DEV_MAX_CHUNKS set to ${DEV_MAX_CHUNKS} based on ${percent}% slider`
-        );
-      }
-    }
+
     const speakerMap = await buildSpeakerMap(chunks);
+    logToFirebase(
+      userId,
+      "info",
+      `👥 Built speaker map with ${speakerMap.size} entries`
+    );
 
     const allLines = [];
     const lineHistory = [];
     let lineCounter = 1;
-
     let processedChunks = 0;
 
     for (let start = 0; start < chunks.length; start += MAX_CHUNKS) {
@@ -617,11 +505,10 @@ app.post("/process-pdf", async (req, res) => {
       );
       const chunkBatch = chunks.slice(start, end);
 
-      console.log(`🧼 Processing chunk batch ${start + 1} to ${end}`);
-      sendSlackMessage(
-        `🧼 Processing chunk batch ${start + 1} to ${end}`,
+      logToFirebase(
+        userId,
         "info",
-        "script-creation-logs"
+        `🧼 Processing chunk batch ${start + 1}-${end}`
       );
 
       const batchLines = await processChunkBatch(
@@ -630,47 +517,62 @@ app.post("/process-pdf", async (req, res) => {
         lineCounter
       );
 
-      console.log(`📦 Saving ${batchLines.length} lines to Supabase...`);
-
       for (const line of batchLines) {
         await saveToSupabase("gs3_lines", {
           scene_id: sceneId,
           line_id: line.line_id,
           line_obj: line.line_obj,
         });
-        console.log(`Saved line ${line.line_id} to Supabase`);
+        logToFirebase(userId, "info", `💾 Saved line ${line.line_id}`);
         allLines.push(line);
         lineCounter++;
       }
 
-      // After lines are saved
       await generateAudioAndVisemes(
         sceneId,
         lineCounter - batchLines.length,
         lineCounter
       );
+      logToFirebase(
+        userId,
+        "info",
+        `🔊 Audio generated for lines ${lineCounter - batchLines.length}–${
+          lineCounter - 1
+        }`
+      );
+
       await generateCharacterStyles(
         sceneId,
         lineCounter - batchLines.length,
         lineCounter
       );
+      logToFirebase(
+        userId,
+        "info",
+        `🎨 Character styles assigned for lines ${
+          lineCounter - batchLines.length
+        }–${lineCounter - 1}`
+      );
+
       await assignZones(sceneId, lineCounter - batchLines.length, lineCounter);
+      logToFirebase(
+        userId,
+        "info",
+        `📸 Zones assigned for lines ${lineCounter - batchLines.length}–${
+          lineCounter - 1
+        }`
+      );
 
       processedChunks += chunkBatch.length;
 
-      sendToClients({
-        type: "progress",
-        message: `${processedChunks}/${chunks.length}`,
-        percent: Math.round((processedChunks / chunks.length) * 100),
+      const percentDone = Math.round((processedChunks / chunks.length) * 100);
+      logToFirebase(userId, "progress", {
+        message: `${processedChunks}/${chunks.length} processed`,
+        percent: percentDone,
         timestamp: new Date().toISOString(),
       });
 
-      // ✅ Emit scene ID after first chunk batch is processed and saved
-      // if (start === 0) {
-      console.log(`🔗 Sending scene ID to clients: ${sceneId}`);
-
-      sendToClients({ type: "scene_id", message: sceneId });
-      // }
+      logToFirebase(userId, "info", `🔗 Scene ID emitted: ${sceneId}`);
     }
 
     sendSlackMessage(
@@ -679,14 +581,10 @@ app.post("/process-pdf", async (req, res) => {
       "script-creation-logs"
     );
 
-    // await generateAudioAndVisemes(sceneId);
-    // await generateCharacterStyles(sceneId);
-    // await assignZones(sceneId);
     const docMetadata = await analyzeRawDocument(parsed.text);
-    // analyzeRawDocument
     const sceneMetadata = {
       scene_id: sceneId,
-      user_id: userId, // ✅ include user_id here
+      user_id: userId,
       scene_name:
         docMetadata.title ||
         parsed.info.Title ||
@@ -700,12 +598,8 @@ app.post("/process-pdf", async (req, res) => {
     };
 
     await saveToSupabase("gs3_scenes", sceneMetadata);
-
-    sendSlackMessage(
-      `📄 Scene metadata saved for ${sceneId}`,
-      "success",
-      "script-creation-logs"
-    );
+    logToFirebase(userId, "success", `📄 Scene metadata saved for ${sceneId}`);
+    await logToFirebase(userId, "scene_id", sceneId); // ✅ ADD THIS LINE
 
     res.json({
       message: "✅ Full transcript processed",
@@ -717,11 +611,8 @@ app.post("/process-pdf", async (req, res) => {
       lines: allLines.map((l) => l.line_obj),
     });
 
-    // ────────────── INTERNAL SUBFUNCTIONS ──────────────
-
     async function buildSpeakerMap(chunks) {
       const map = new Map();
-
       for (let i = 0; i < Math.min(chunks.length, MAX_CHUNKS); i++) {
         const detected = await extractCharactersFromChunk(chunks[i], map);
         for (const char of detected) {
@@ -742,14 +633,11 @@ app.post("/process-pdf", async (req, res) => {
         voice: "en-US-Wavenet-C",
       });
 
-      // map.set("audience", {
-      //   name: "Audience",
-      //   speaker_label: "Audience",
-      //   role: "audience",
-      //   voice: "en-US-Wavenet-C",
-      // });
-
-      console.log("👥 Final Speaker Map:", Object.fromEntries(map));
+      logToFirebase(
+        userId,
+        "info",
+        `👥 Final Speaker Map: ${JSON.stringify(Object.fromEntries(map))}`
+      );
       sendSlackMessage(
         `👥 Final Speaker Map: ${JSON.stringify(Object.fromEntries(map))}`,
         "info",
@@ -769,10 +657,8 @@ app.post("/process-pdf", async (req, res) => {
           speakerMap,
           lineHistory
         );
-
         for (const lineObj of structuredLines) {
           lineObj.voice = assignVoiceForSpeaker(lineObj.character_id);
-
           batchLines.push({ line_id: lineId, line_obj: lineObj });
 
           lineHistory.push({
@@ -783,7 +669,6 @@ app.post("/process-pdf", async (req, res) => {
           });
 
           if (lineHistory.length > 15) lineHistory.shift();
-
           lineId++;
         }
       }
@@ -792,6 +677,11 @@ app.post("/process-pdf", async (req, res) => {
     }
   } catch (err) {
     console.error("❌ PDF parsing error:", err);
+    logToFirebase(
+      req.body.user_id || "unknown_user",
+      "error",
+      `❌ PDF processing failed: ${err.message}`
+    );
     res.status(500).json({ error: "Failed to parse PDF" });
   }
 });
@@ -2146,15 +2036,15 @@ app.get("/get-stitched-video/:sceneId", async (req, res) => {
   }
 });
 
-["log", "info", "warn", "error"].forEach((method) => {
-  const original = console[method];
-  console[method] = (...args) => {
-    const timestamp = new Date().toISOString();
-    const message = util.format(...args); // ← Safe formatting
-    sendToClients({ type: method, message, timestamp });
-    original(`[${timestamp}]`, ...args);
-  };
-});
+// ["log", "info", "warn", "error"].forEach((method) => {
+//   const original = console[method];
+//   console[method] = (...args) => {
+//     const timestamp = new Date().toISOString();
+//     const message = util.format(...args); // ← Safe formatting
+//     sendToClients({ type: method, message, timestamp });
+//     original(`[${timestamp}]`, ...args);
+//   };
+// });
 
 app.listen(port, () => {
   console.log(`✅ PDF parser server running on http://localhost:${port}`);
