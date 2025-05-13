@@ -1,9 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { getSupabase } from "../utils/supabase";
-
+import { supabase } from "@/utils/supabase";
 export async function getServerSideProps() {
-  const supabase = getSupabase();
   const { data: scenes } = await supabase.from("gs3_scenes").select("*");
   const { data: lineCounts } = await supabase
     .from("gs3_line_counts")

@@ -1,18 +1,15 @@
+// pages/api/preview-pdf.js
 import { formidable } from "formidable";
 import fs from "fs";
 import path from "path";
 import FormData from "form-data";
 import axios from "axios";
 
-const USE_ML_SERVER = false;
-const SERVER_PORT = USE_ML_SERVER ? 3002 : 3001;
-const SERVER_URL = `http://localhost:${SERVER_PORT}/upload`;
-
 export const config = {
-  api: {
-    bodyParser: false,
-  },
+  api: { bodyParser: false },
 };
+
+const SERVER_URL = `http://localhost:3001/preview-pdf`;
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -30,10 +27,6 @@ export default async function handler(req, res) {
     multiples: false,
   });
 
-  form.on("progress", (bytesReceived, bytesExpected) => {
-    console.log(`Upload progress: ${bytesReceived}/${bytesExpected}`);
-  });
-
   form.parse(req, async (err, fields, files) => {
     if (err) {
       console.error("Form parse error:", err);
@@ -45,33 +38,26 @@ export default async function handler(req, res) {
     const filename = Array.isArray(file)
       ? file[0].originalFilename
       : file.originalFilename;
-
     try {
-      const fileBuffer = fs.readFileSync(filePath); // ✅ use buffer, not stream
+      const fileBuffer = fs.readFileSync(filePath);
       const formData = new FormData();
-      formData.append("pdf", fileBuffer, filename); // ✅ fix here
-
-      const percent = Array.isArray(fields.pdf_percent)
-        ? fields.pdf_percent[0]
-        : fields.pdf_percent || "100";
-      formData.append("pdf_percent", percent);
-
-      console.log("Parsed fields:", fields);
+      formData.append("pdf", fileBuffer, filename);
+      formData.append("user_id", fields.user_id?.[0] || fields.user_id); // ✅ forward user_id
 
       const response = await axios.post(SERVER_URL, formData, {
-        headers: {
-          ...formData.getHeaders(),
-        },
+        headers: { ...formData.getHeaders() },
         maxContentLength: Infinity,
         maxBodyLength: Infinity,
       });
 
-      fs.unlinkSync(filePath); // ✅ clean up
+      fs.unlinkSync(filePath);
 
-      res.status(200).json(response.data);
+      return res.status(200).json(response.data);
     } catch (err) {
       console.error("Forwarding error:", err.response?.data || err.message);
-      res.status(500).json({ error: "Failed to send file to server" });
+      return res
+        .status(500)
+        .json({ error: "Failed to upload PDF for preview" });
     }
   });
 }

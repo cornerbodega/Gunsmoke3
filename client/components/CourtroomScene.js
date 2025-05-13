@@ -56,6 +56,8 @@ export default function CourtroomScene({
 }) {
   const sessionId = useMemo(() => uuidv4(), []);
   // Proxy that supports resolving aliases seamlessly
+  const [showStitchedModal, setShowStitchedModal] = useState(false);
+  const [stitchedVideoUrl, setStitchedVideoUrl] = useState(null);
 
   // NEW: Fetch all lines if the initial prop is limited to 1000 lines.
 
@@ -82,6 +84,8 @@ export default function CourtroomScene({
   const [showDefaultJudge, setShowDefaultJudge] = useState(false);
   const [showJury, setShowJury] = useState(true);
   const combinedStreamRef = useRef(null);
+  const [isMerging, setIsMerging] = useState(false);
+  const [mergeMessage, setMergeMessage] = useState("Merging...");
 
   const audienceIds = useMemo(() => {
     const ids = [];
@@ -157,6 +161,42 @@ export default function CourtroomScene({
       audioContextRef.current.createMediaStreamDestination();
   }, []);
   const [audioReady, setAudioReady] = useState(false); // ⬅️ Add this
+
+  const pollMergeStatus = async (sceneId, maxAttempts = 30, delay = 3000) => {
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const res = await fetch(`/api/get-stitched-video/${sceneId}`);
+        if (res.ok) {
+          const { video_url } = await res.json();
+          if (video_url) {
+            setMergeMessage("✅ Merge complete!");
+            setStitchedVideoUrl(`${video_url}?t=${Date.now()}`);
+
+            setShowStitchedModal(true);
+            await new Promise((r) => setTimeout(r, 1500));
+            setIsMerging(false);
+            return;
+          }
+        } else if (res.status !== 404) {
+          // Only log unexpected errors, not 404 (video not ready)
+          const error = await res.json();
+          console.warn("🔁 Merge polling error:", error);
+          setMergeMessage("⚠️ Server error checking status");
+        } else {
+          setMergeMessage(`Merging... (${attempt}/${maxAttempts})`);
+        }
+      } catch (err) {
+        console.error("❌ Polling failed:", err);
+        setMergeMessage("⚠️ Network error");
+      }
+
+      await new Promise((r) => setTimeout(r, delay));
+    }
+
+    setMergeMessage("❌ Merge timeout or not found.");
+    await new Promise((r) => setTimeout(r, 2000));
+    setIsMerging(false);
+  };
 
   // --- New Effect: Set audioReady on first user interaction ---
   // This ensures that the browser allows audio playback.
@@ -288,8 +328,8 @@ export default function CourtroomScene({
       const avg = sum / sliceSize;
       result.push({ time: i / decoded.sampleRate, amplitude: avg });
     }
+    // ctx.close();
 
-    ctx.close();
     return result;
   }
 
@@ -398,10 +438,8 @@ export default function CourtroomScene({
             method: "POST",
             body: formData,
           });
-
           recordedChunks.current = [];
           mediaRecorder.current = null;
-
           console.log(`✅ MP4 uploaded for line_id ${line_id}`);
           if (i === endIndex) {
             console.log(`<<Close Virtual Browser>>`);
@@ -432,7 +470,7 @@ export default function CourtroomScene({
       ...audioStream.getTracks(),
     ]);
 
-    mediaRecorder.current = new MediaRecorder(combinedStream, {
+    mediaRecorder.current = new MediaRecorder(combinedStreamRef.current, {
       mimeType: "video/webm; codecs=vp9",
       videoBitsPerSecond: 4000000, // or 2500000 for 720p
     });
@@ -565,18 +603,46 @@ export default function CourtroomScene({
     });
   };
 
-  // --- Key Handler for Start Recording & Serial Playback ---
+  // --- Key Handler for Conversion ---
   useEffect(() => {
     const handleKeyDown = async (e) => {
+      if (e.key.toLowerCase() === "m") {
+        const line_id = lines[currentIndex]?.line_id ?? 1;
+        const input_gcs_path = `video/alameda-${sceneId}/${line_id}.mp4`;
+        const output_name = `${line_id}`;
+
+        setIsMerging(true);
+        setMergeMessage("Merging...");
+
+        await stitchVideoViaApi({
+          sceneId,
+          input_gcs_path,
+          output_name,
+          line_id,
+        });
+
+        await pollMergeStatus(sceneId); // 👈 Updated
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [sceneId, sessionId, lines, currentIndex]);
+
+  // --- Key Handler for Start Recording & Serial Playback ---
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key !== "Enter") return;
+
       console.log("↩️ Enter key pressed");
       console.log("audioReady:", audioReady);
       console.log("headRefsReady:", headRefsReady);
       console.log("currentIndex:", currentIndex);
-      // Only proceed if head refs and audio are ready and key is Enter.
-      if (!headRefsReady || !audioReady || e.key !== "Enter") {
-        return console.log("❌ Not ready to start recording");
+
+      if (!headRefsReady || !audioReady) {
+        console.log("❌ Not ready to start recording");
+        return;
       }
-      // Trigger the start process only once
 
       if (currentIndex === -1) {
         setPlayTriggered(true);
@@ -586,20 +652,33 @@ export default function CourtroomScene({
           audioContextRef.current &&
           audioContextRef.current.state === "suspended"
         ) {
-          await audioContextRef.current.resume();
-        }
-        console.log(`enter: skipIntro: ${skipIntro}`);
+          audioContextRef.current
+            .resume()
+            .then(() => {
+              console.log(`enter: skipIntro: ${skipIntro}`);
 
-        if (skipIntro) {
-          console.log("⏭️ Skipping intro, starting playback immediately");
-          setIntroPlaying(false);
-          runPlayback(); // 👈 start immediately
+              if (skipIntro) {
+                console.log("⏭️ Skipping intro, starting playback immediately");
+                setIntroPlaying(false);
+                runPlayback();
+              }
+            })
+            .catch((err) => {
+              console.error("Failed to resume AudioContext:", err);
+            });
+        } else {
+          if (skipIntro) {
+            console.log("⏭️ Skipping intro, starting playback immediately");
+            setIntroPlaying(false);
+            runPlayback();
+          }
         }
       }
     };
+
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [currentIndex, lines, headRefsReady, audioReady]);
+  }, [audioReady, headRefsReady, currentIndex, skipIntro, runPlayback]);
 
   // useEffect(() => {
   //   console.log(`[Scene] currentAudioTime: ${currentAudioTime?.toFixed(2)}`);
@@ -1134,6 +1213,19 @@ export default function CourtroomScene({
                                   judgeCharacterId,
                                   "judge"
                                 ),
+                                viseme_data:
+                                  currentIndex !== -1 &&
+                                  lines[currentIndex].line_obj.character_id ===
+                                    judgeCharacterId
+                                    ? lines[currentIndex].line_obj.viseme_data
+                                    : null,
+                                audioTime:
+                                  currentIndex !== -1 &&
+                                  lines[currentIndex].line_obj.character_id ===
+                                    judgeCharacterId
+                                    ? currentAudioTime
+                                    : 0,
+
                                 eyeTargetRef: lookTargetRef,
                                 speakerTargetRef,
                                 activeSpeakerId,
@@ -1187,22 +1279,22 @@ export default function CourtroomScene({
                 })()}
                 {/* Judge (always at bench) */}
                 {/* <Character
-                  key="judge"
-                  {...getLocationPose("judge_sitting_at_judge_bench")}
-                  onReady={(headRef) =>
-                    registerCharacter("judge", headRef, "judge")
-                  }
-                  params={{
-                    sitting: true,
-                    role: "judge",
-                    characterId: "judge",
-                    style: getStyleForCharacter("judge", "judge"),
-                    eyeTargetRef: lookTargetRef,
-                    speakerTargetRef,
-                    activeSpeakerId,
-                    emotion: "angry",
-                  }}
-                /> */}
+                 key="judge"
+                 {...getLocationPose("judge_sitting_at_judge_bench")}
+                 onReady={(headRef) =>
+                   registerCharacter("judge", headRef, "judge")
+                 }
+                 params={{
+                   sitting: true,
+                   role: "judge",
+                   characterId: "judge",
+                   style: getStyleForCharacter("judge", "judge"),
+                   eyeTargetRef: lookTargetRef,
+                   speakerTargetRef,
+                   activeSpeakerId,
+                   emotion: "angry",
+                 }}
+               /> */}
                 {/* Clerk (always in clerk_box) */}
                 {showDefaultClerk && (
                   <Character
@@ -1344,6 +1436,114 @@ export default function CourtroomScene({
           )}
         </Suspense>
       </Canvas>
+      {isMerging && (
+        <div
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            width: "100vw",
+            height: "100vh",
+            backgroundColor: "rgba(0,0,0,0.75)",
+            color: "white",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: "2rem",
+            zIndex: 1000,
+            pointerEvents: "none",
+          }}
+        >
+          {mergeMessage}
+        </div>
+      )}
+      {showStitchedModal && (
+        <div
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            width: "100vw",
+            height: "100vh",
+            backgroundColor: "rgba(0,0,0,0.9)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 1001,
+          }}
+        >
+          <div
+            style={{
+              background: "linear-gradient(145deg, #1a1a1a, #111)",
+              padding: "2rem",
+              borderRadius: "16px",
+              maxWidth: "90%",
+              maxHeight: "90%",
+              boxShadow:
+                "0 0 25px rgba(255, 0, 80, 0.35), 0 0 80px rgba(0, 255, 255, 0.08)",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              border: "1px solid #333",
+            }}
+          >
+            <h2
+              style={{
+                fontSize: "2rem",
+                marginBottom: "1.25rem",
+                color: "#f8f8f8",
+                textShadow: "0 0 12px rgba(255, 255, 255, 0.2)",
+                display: "flex",
+                alignItems: "center",
+                gap: "0.5rem",
+              }}
+            >
+              <span role="img" aria-label="clapperboard">
+                🎬
+              </span>{" "}
+              Click the three dots{" "}
+              <span style={{ fontWeight: "3em" }}>[ ⋮ ]</span> to download ↘️
+              {/* Click the three dots {"->"} Download */}
+            </h2>
+            <video
+              src={stitchedVideoUrl}
+              controls
+              style={{
+                maxWidth: "100%",
+                maxHeight: "70vh",
+                marginBottom: "1.5rem",
+                borderRadius: "10px",
+                boxShadow: "0 0 25px rgba(255, 255, 255, 0.08)",
+              }}
+            />
+            <button
+              style={{
+                padding: "0.75rem 1.5rem",
+                background: "radial-gradient(circle, #ff004c 0%, #660022 100%)",
+                color: "#fff",
+                fontWeight: "bold",
+                border: "none",
+                borderRadius: "8px",
+                cursor: "pointer",
+                boxShadow: "0 0 12px rgba(255, 0, 76, 0.5)",
+                transition: "all 0.3s ease",
+              }}
+              onClick={() => {
+                setShowStitchedModal(false);
+                setStitchedVideoUrl(null);
+              }}
+              onMouseEnter={(e) =>
+                (e.target.style.boxShadow = "0 0 20px rgba(255, 0, 76, 0.8)")
+              }
+              onMouseLeave={(e) =>
+                (e.target.style.boxShadow = "0 0 12px rgba(255, 0, 76, 0.5)")
+              }
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1518,4 +1718,36 @@ function JudgeIntroAnimation({
       />
     </group>
   );
+}
+
+async function stitchVideoViaApi({
+  sceneId,
+  input_gcs_path,
+  output_name,
+  line_id,
+  video_type = "converted",
+}) {
+  try {
+    const response = await fetch(`/api/stitch-videos/${sceneId}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        input_gcs_path,
+        output_name,
+        line_id,
+        video_type,
+      }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      throw new Error(data.error || "Video conversion failed");
+    }
+
+    console.log("✅ Convert successful:", data.video_url);
+    return data;
+  } catch (error) {
+    console.error("❌ Convert API error:", error);
+  }
 }

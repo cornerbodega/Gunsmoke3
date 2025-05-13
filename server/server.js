@@ -3,8 +3,14 @@ require("dotenv").config();
 const { createClient } = require("@supabase/supabase-js");
 const saveToSupabase = require("./utils/saveToSupabase");
 const crypto = require("crypto");
-
+const { cancelJob, createJob, isJobCancelled } = require("./utils/jobUtils");
+const util = require("util");
 const sendSlackMessage = require("./utils/sendToSlack.js"); // adjust path if needed
+const { PassThrough } = require("stream");
+const { GoogleAuth } = require("google-auth-library");
+
+const { google } = require("googleapis");
+const compute = google.compute("beta");
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -52,17 +58,25 @@ function setupGoogleCredentialsFromBase64() {
 
 setupGoogleCredentialsFromBase64(); // 🧠 MUST be before using any GCP clients
 
+const credsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+const rawCreds = fs.readFileSync(credsPath, "utf8");
+const parsed = JSON.parse(rawCreds);
+console.log("🔑 Parsed service account email:", parsed.client_email);
+console.log("🔑 Project ID from credentials:", parsed.project_id);
+
 const textToSpeech = require("@google-cloud/text-to-speech");
 const client = new textToSpeech.TextToSpeechClient();
 const { Storage } = require("@google-cloud/storage");
 const { log } = require("console");
 const storage = new Storage();
+const bucket = storage.bucket(process.env.GCS_BUCKET_NAME);
 
 const app = express();
 const port = 3001;
 
 app.use(cors());
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 const upload = multer({
   dest: "uploads/",
@@ -198,7 +212,329 @@ async function getAllLinesForScene(sceneId) {
   return allRows;
 }
 
-app.post("/upload", upload.any(), async (req, res) => {
+app.post(
+  "/preview-pdf",
+  upload.fields([{ name: "pdf", maxCount: 1 }]),
+  async (req, res) => {
+    console.log("📥 req.body:", req.body);
+    console.log("📂 req.files:", req.files);
+    const userId = req.body.user_id;
+    console.log("🔍 user_id from form:", userId);
+    try {
+      console.log(`📥 Req.body ${JSON.stringify(req.body)}`);
+      const userId = req.body.user_id || req.body["user_id"];
+
+      const file = req.files?.pdf?.[0];
+      if (!file) throw new Error("No PDF found");
+      const user_id = req.body.user_id || req.body["user_id"];
+      console.log("🔍 user_id from form:", user_id);
+
+      if (!file) throw new Error("No PDF found");
+
+      // send initial SSE progress if you use SSE...
+      sendToClients({
+        type: "progress",
+        message: "📥 Reading PDF file...",
+        percent: 5,
+        timestamp: new Date().toISOString(),
+      });
+
+      // 1.1) Create new scene
+      const newSceneId = crypto.randomUUID();
+      const newSceneMetadata = {
+        title: `Scene preview ${newSceneId.slice(0, 8)}`,
+        summary: `Initial preview scene created by user ${user_id}`,
+        created_at: new Date().toISOString(),
+      };
+      await saveToSupabase("gs3_scenes", {
+        scene_id: newSceneId,
+        scene_name: `Preview for ${newSceneId.slice(0, 8)}`,
+        user_id: userId, // ✅ Ensure this is included
+
+        metadata: newSceneMetadata,
+      });
+
+      // 1.2) Read & upload the PDF
+      const sessionId = crypto.randomUUID();
+      await createJob({
+        job_id: sessionId,
+        scene_id: newSceneId,
+        user_id,
+      });
+
+      const buffer = fs.readFileSync(file.path);
+      const gcsPath = `pdf/tmp-preview-${sessionId}.pdf`;
+
+      sendToClients({
+        type: "progress",
+        message: "☁️ Uploading to GCS...",
+        percent: 15,
+        timestamp: new Date().toISOString(),
+      });
+      const pdfUrl = await uploadToGCS(buffer, gcsPath, "application/pdf");
+
+      // 2) Parse & chunk
+      sendToClients({
+        type: "progress",
+        message: "🧠 Parsing PDF and extracting text...",
+        percent: 35,
+        timestamp: new Date().toISOString(),
+      });
+      const parsed = await pdfParse(buffer);
+      const chunks = splitBySpeakerAndLength(parsed.text, textChunkSize);
+      const previewChunk = chunks[0];
+
+      // 3) Identify speakers
+      sendToClients({
+        type: "progress",
+        message: "🧬 Identifying speakers...",
+        percent: 55,
+        timestamp: new Date().toISOString(),
+      });
+      if (await isJobCancelled(sessionId)) {
+        console.warn(`🚫 Job ${sessionId} was cancelled`);
+        return res.status(409).json({ error: "Job cancelled." });
+      }
+
+      const speakerMap = await extractCharactersFromChunk(
+        previewChunk,
+        new Map()
+      );
+
+      // 4) Prepare sampleInput & full prompt
+      const sampleInput = previewChunk;
+      const contextPrompt = `
+      You are cleaning and formatting courtroom transcript lines into structured JSON. Each line of dialog should include:
+      - character_id (use character map),
+      - role,
+      - posture,
+      - emotion,
+      - text (just the spoken text),
+      - eye_target (character_id of the person being spoken to, not the speaker. Use "audience" if unknown),
+      - pause_before (number, seconds)
+
+      If something is not dialog (e.g., action notes), ignore it. Use common sense to infer who’s speaking and who they’re speaking to.
+
+      Speaker map:
+      ${JSON.stringify(speakerMap)}`;
+
+      console.log("📄 sampleInput:", sampleInput);
+      if (await isJobCancelled(sessionId)) {
+        console.warn(`🚫 Job ${sessionId} was cancelled`);
+        return res.status(409).json({ error: "Job cancelled." });
+      }
+
+      // 5) Call OpenAI with **full** messages list
+      const response = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        messages: [
+          { role: "system", content: contextPrompt },
+          {
+            role: "user",
+            content: `NGN & WOOTTON 07 JUL Claim No QB-2018-006323 IN THE HIGH COURT OF JUSTICE QUEEN'S BENCH DIVISION MEDIA AND COMMUNICATIONS LIST Royal Courts of Justice, Strand, London, WC2A 2LL Tuesday, 7th July, 2020 Before: MR. JUSTICE NICOL BETWEEN: JOHN CHRISTOPHER DEPP II Claimant – and – (1) NEWS GROUP NEWSPAPERS LIMITED (2) DAN WOOTTON Defendants (Transcript of the Stenograph Notes of Marten Walsh Cherer Limited, 2nd Floor, Quality House, 9 Quality Court, Chancery Lane, London, WC2A 1HP. Telephone No: 020 7067 2900. Fax No: 020 7831 6864. Email: info@martenwalshcherer.com. www.martenwalshcherer.com) MR. DAVID SHERBORNE, MS. ELEANOR LAWS QC and MS. KATE WILSON (instructed by Schillings) appeared for the Claimant. MS. SASHA WASS QC, MR. ADAM WOLANSKI QC and MS. CLARA HAMER (instructed by Simons Muirhead & Burton) appeared for the Defendants. PROCEEDINGS (DAY I) (TRANSCRIPT PREPARED WITHOUT ACCESS TO COURT BUNDLES)
+
+--- Page 1 ---
+1 HOUSEKEEPING
+2 MR. JUSTICE NICOL: Before the trial begins, I want to say a few words by way of introduction. This is the trial of the libel action which Johnny Depp, the claimant, has brought against News Group Newspapers Limited, the publishers of The Sun, and Mr. Daniel Wootton.
+3 There are some features which the trial will have that are the same as any other trial. There are others which are necessarily different. First, the features which are common to other trials. The trial is by judge alone. There is no jury. It will be for me, Nicol J, as the judge, to make any necessary findings of fact and rule on any issues of law.
+4 Next, it will be important for there to be silence when witnesses give their evidence and when the counsel are making their submissions. Next, as with all trials in England and Wales, there may be no photography of anyone in court. That includes stills, moving pictures, sketches, or screenshots. The law also prohibits sound recordings of the court proceedings. Disregarding these restrictions can be contempt of court and can lead to imprisonment. There will be an official audio recording of the trial, which may be purchased.
+5 All mobile phones must be switched to silent. Anyone may take notes of the hearing as it continues. Journalists, but only journalists, may report live by Twitter or other similar live text platforms.
+--- Page 2 ---
+1 HOUSEKEEPING (continued)
+2 COVID-19 restrictions mean social distancing must be observed: no one less than two metres from anyone else. The public gallery has been opened, but these limits mean not all lawyers or representatives can be accommodated in this court. A second courtroom has been made available for those who cannot fit here.
+3 Our press and public are free to attend in principle, but, in practice, space is limited. Three further spill‑over courts have been opened, for a total of five. They will all receive the same audio and video feed.
+4 Some witnesses will appear in court, others via video link from the USA, the Bahamas, and Australia.
+5 The trial is expected to last three weeks. We start at 10am each day, lunch at 1pm, finish at about 4:30pm. Breaks will be kept under review.
+6 To save time, opening statements will be submitted in writing.
+7 Skeleton arguments will be available from the parties’ solicitors. Neither the openings nor skeletons will refer to parts in private.
+8 Now, Mr. Sherborne.
+--- Page 3 ---
+MR. SHERBORNE: May it please your Lordship, I appear with Ms. Laws and Ms. Wilson on behalf of the claimant, Johnny Depp. My learned friends Ms. Wass, Mr. Wolanski, and Ms. Hamer appear for the defendants.
+`,
+          },
+          {
+            role: "assistant",
+            content: JSON.stringify([
+              {
+                character_id: "justice_nicol",
+                role: "judge",
+                posture: "seated",
+                emotion: "neutral",
+                text: "Before the trial begins, I want to say a few words by way of introduction.",
+                eye_target: "audience",
+                pause_before: 0.5,
+              },
+              {
+                character_id: "justice_nicol",
+                role: "judge",
+                posture: "seated",
+                emotion: "neutral",
+                text: "This is the trial of the libel action which Johnny Depp, the claimant, has brought against News Group Newspapers Limited, the publishers of The Sun, and Mr. Daniel Wootton.",
+                eye_target: "audience",
+                pause_before: 0.5,
+              },
+              {
+                character_id: "justice_nicol",
+                role: "judge",
+                posture: "seated",
+                emotion: "neutral",
+                text: "There are some features which the trial will have that are the same as any other trial. There are others which are necessarily different.",
+                eye_target: "audience",
+                pause_before: 0.5,
+              },
+              {
+                character_id: "justice_nicol",
+                role: "judge",
+                posture: "seated",
+                emotion: "neutral",
+                text: "The trial is by judge alone. There is no jury.",
+                eye_target: "audience",
+                pause_before: 0.5,
+              },
+              {
+                character_id: "justice_nicol",
+                role: "judge",
+                posture: "seated",
+                emotion: "firm",
+                text: "There may be no photography, screenshots, or sound recordings in court. Breaching this can lead to imprisonment.",
+                eye_target: "audience",
+                pause_before: 0.6,
+              },
+              {
+                character_id: "justice_nicol",
+                role: "judge",
+                posture: "seated",
+                emotion: "neutral",
+                text: "COVID-19 restrictions require everyone in court to maintain a distance of at least two metres.",
+                eye_target: "audience",
+                pause_before: 0.5,
+              },
+              {
+                character_id: "justice_nicol",
+                role: "judge",
+                posture: "seated",
+                emotion: "grateful",
+                text: "I am grateful to the Court Service for arranging spill‑over courtrooms to accommodate the public and press.",
+                eye_target: "audience",
+                pause_before: 0.5,
+              },
+              {
+                character_id: "justice_nicol",
+                role: "judge",
+                posture: "seated",
+                emotion: "neutral",
+                text: "Some witnesses will give evidence in court, others via video link from the USA, the Bahamas, and Australia.",
+                eye_target: "audience",
+                pause_before: 0.5,
+              },
+              {
+                character_id: "justice_nicol",
+                role: "judge",
+                posture: "seated",
+                emotion: "neutral",
+                text: "The trial is expected to last three weeks. We will start each day's hearing at 10 a.m.",
+                eye_target: "audience",
+                pause_before: 0.5,
+              },
+              {
+                character_id: "justice_nicol",
+                role: "judge",
+                posture: "seated",
+                emotion: "neutral",
+                text: "To save time, opening statements will be submitted in writing.",
+                eye_target: "audience",
+                pause_before: 0.5,
+              },
+              {
+                character_id: "mr_sherborne",
+                role: "prosecutor",
+                posture: "standing",
+                emotion: "respectful",
+                text: "May it please your Lordship, I appear with Ms. Laws and Ms. Wilson on behalf of the claimant, Johnny Depp.",
+                eye_target: "justice_nicol",
+                pause_before: 0.5,
+              },
+              {
+                character_id: "mr_sherborne",
+                role: "prosecutor",
+                posture: "standing",
+                emotion: "neutral",
+                text: "My learned friends Ms. Wass, Mr. Wolanski, and Ms. Hamer appear for the defendants.",
+                eye_target: "justice_nicol",
+                pause_before: 0.5,
+              },
+            ]),
+          },
+          {
+            role: "user",
+            content: sampleInput,
+          },
+        ],
+      });
+
+      // 6) Handle the response
+      if (!response.choices || response.choices.length === 0) {
+        throw new Error("No response from OpenAI");
+      }
+      let sampleOutput = response.choices[0].message.content
+        .trim()
+        .replace(/^```(?:json)?\s*/i, "")
+        .replace(/```$/, "")
+        .trim();
+      console.log(`📦 Sample output:`, sampleOutput);
+
+      sendToClients({
+        type: "progress",
+        message: "📦 Structuring preview lines...",
+        percent: 90,
+        timestamp: new Date().toISOString(),
+      });
+      if (await isJobCancelled(sessionId)) {
+        console.warn(`🚫 Job ${sessionId} was cancelled`);
+        return res.status(409).json({ error: "Job cancelled." });
+      }
+
+      // 7) Turn that into structured JSON
+      const structuredLines = await processChunk(
+        previewChunk,
+        speakerMap,
+        [],
+        sampleInput,
+        sampleOutput
+      );
+
+      sendToClients({
+        type: "progress",
+        message: "✅ Preview complete",
+        percent: 100,
+        timestamp: new Date().toISOString(),
+      });
+
+      // 8) Return everything
+      res.json({
+        previewChunk,
+        speakerMap,
+        structuredLines,
+        gcsPath,
+        pdfUrl,
+        scene_id: newSceneId,
+        sessionId,
+        sampleInput,
+        sampleOutput,
+      });
+    } catch (err) {
+      console.error("❌ Preview failed:", err);
+      sendToClients({
+        type: "error",
+        message: `❌ Preview generation error: ${err.message}`,
+        timestamp: new Date().toISOString(),
+      });
+      res.status(500).json({ error: "Preview generation failed." });
+    }
+  }
+);
+
+app.post("/process-pdf", async (req, res) => {
   try {
     console.log("📥 Received PDF upload...");
     sendSlackMessage(
@@ -206,18 +542,26 @@ app.post("/upload", upload.any(), async (req, res) => {
       "info",
       "script-creation-logs"
     );
+    const sceneId = req.body.scene_id;
+    const gcsPath = req.body.gcsPath;
+    const pdfUrl = `https://storage.googleapis.com/${process.env.GCS_BUCKET_NAME}/${gcsPath}`;
 
-    const sceneId = crypto.randomUUID();
-    const file = req.files.find((f) => f.fieldname === "pdf");
-    if (!file) {
-      throw new Error("❌ No PDF file found in upload.");
-    }
-    const filePath = file.path;
+    const userId = req.body.user_id || "unknown_user";
+    // ⬆️ Upload to GCS under "pdf/" folder
 
-    const dataBuffer = fs.readFileSync(filePath);
-    const parsed = await pdfParse(dataBuffer);
-    const docMetadata = await analyzeRawDocument(parsed.text);
-    fs.unlinkSync(filePath);
+    console.log(`☁️ Uploaded PDF to GCS at: ${pdfUrl}`);
+
+    // const [bucketName, ...fileParts] = gcsPath.replace("pdf/", "").split("/");
+    // const filePath = `pdf/${fileParts.join("/")}`;
+    // const bucket = storage.bucket(process.env.GCS_BUCKET_NAME);
+    const file = storage.bucket(process.env.GCS_BUCKET_NAME).file(gcsPath);
+
+    const [buffer] = await file.download();
+    ``;
+    // fs.unlinkSync(file.path); // clean local temp file
+
+    // ⬇️ You can either use `buffer` here, or download from GCS again
+    const parsed = await pdfParse(buffer);
 
     console.log("📄 PDF parsed successfully");
     sendSlackMessage(
@@ -284,12 +628,15 @@ app.post("/upload", upload.any(), async (req, res) => {
         lineCounter
       );
 
+      console.log(`📦 Saving ${batchLines.length} lines to Supabase...`);
+
       for (const line of batchLines) {
         await saveToSupabase("gs3_lines", {
           scene_id: sceneId,
           line_id: line.line_id,
           line_obj: line.line_obj,
         });
+        console.log(`Saved line ${line.line_id} to Supabase`);
         allLines.push(line);
         lineCounter++;
       }
@@ -333,9 +680,11 @@ app.post("/upload", upload.any(), async (req, res) => {
     // await generateAudioAndVisemes(sceneId);
     // await generateCharacterStyles(sceneId);
     // await assignZones(sceneId);
-
+    const docMetadata = await analyzeRawDocument(parsed.text);
+    // analyzeRawDocument
     const sceneMetadata = {
       scene_id: sceneId,
+      user_id: userId, // ✅ include user_id here
       scene_name:
         docMetadata.title ||
         parsed.info.Title ||
@@ -800,22 +1149,22 @@ async function extractCharactersFromChunk(chunkText, speakerMap) {
       {
         "speaker_label": "A",
         "role": "witness",
-        "id": "mr_bankmanfried"
+        "character_id": "mr_bankmanfried"
       },
       {
         "speaker_label": "Q",
         "role": "prosecutor",
-        "id": "ms_sassoon"
+        "character_id": "ms_sassoon"
       },
       {
         "speaker_label": "Q",
         "role": "defense",
-        "id": "mr_cohen"
+        "character_id": "mr_cohen"
       },
       {
         "speaker_label": "THE COURT",
         "role": "judge",
-        "id": "judge_cannon"
+        "character_id": "judge_cannon"
       }
     ]
     Here are the characters we have so far, do not repeat these:
@@ -866,153 +1215,31 @@ async function extractCharactersFromChunk(chunkText, speakerMap) {
   }
 }
 
-async function processChunk(chunkText, speakerMap, previousLines) {
+async function processChunk(
+  chunkText,
+  speakerMap,
+  previousLines,
+  sampleInput,
+  sampleOutput
+) {
   // Expect full line objects with metadata instead of plain text
-  return await cleanText(chunkText, speakerMap, previousLines);
-}
-
-async function cleanText(chunkText, speakerMap, previousLines) {
-  const sampleInput = `
---- Page 1 --- DEPP v NGN & WOOTTON 07 JUL Claim No QB-2018-006323 IN THE HIGH COURT OF JUSTICE QUEEN'S BENCH DIVISION MEDIA AND COMMUNICATIONS LIST Royal Courts of Justice, Strand, London, WC2A 2LL Tuesday, Tth July, 2020 Before: MR. JUSTICE NICOL BETWEEN. JOHN CHRISTOPHER DEPP Il Claimant -and- (1) NEWS GROUP NEWSPAPERS LIMITED (2) DAN WOOTTON Defendants (Transcript of the Stenograph Notes of Marten Walsh Cherer Limited, 2nd Floor, Quality House, 9 Quality Court, Chancery Lane, London, WC2A THP. Telephone No: 020 7067 2900. Fax No: 020 7831 6864. Email: info@martenwalshcherer com. www. martenwalsheherer com) MR. DAVID SHERBORNE, MS. ELEANOR LAWS QC and MS. KATE WILSON (instructed by Schillings) appeared for the Claimant. MS. SASHA WASS QC, MR. ADAM WOLANSKI QC and MS. CLARA HAMER (instructed by Simons Muirhead & Burton) appeared for the Defendants. PROCEEDINGS (DAY I) (TRANSCRIPT PREPARED WITHOUT ACCESS TO COURT BUNDLES) [Page 1] --- Page 2 --- 1 HOUSEKEEPING 2 MR. JUSTICE NICOL: Before the trial begins, I want to say a few 3 words by way of introduction. This is the trial of the libel 4 action which Johnny Depp, the second the claimant, usually 5 known as Johnny Depp, has brought against News Group [3 Newspapers Limited, the publishers of The Sun, and a 7 journalist, Daniel Wootton. 8 There are some features which the trial will have that 9 are the same as any other trial. There are others which are 10 necessarily different. First, the features which are common 11 to other trials. The trial is by judge alone. There is no 12 jury. Tt will be for me, Nicol J, as the judge, to make any 13 necessary findings of fact and rule on any issues of law, 14 Next, it will be important for there to be silence when 15 witnesses give their evidence and when the barristers are 16 ‘making their submissions. Next, as with all trials in England 17 and Wales, there may be no photography of anyone in court. 18 Our legislation prohibits the taking of both still and moving 19 pictures or sketching anyone while in court. That includes 20 screen shots. The law also prohibits sound recordings of the 21 court proceedings. Disregarding these restrictions can be 22 contempt of court and can lead to imprisonment. There will be 23 an official audio recording of the trial and anyone may 24 purchase a transeript. Because it is important that the 25 evidence can proceed without distraction, all mobile phones MARTEN WALSH CHERER LTD ~~ 2ND FLOOR, 6-9 QUALIT: TEL: (020) 7067 2900 E-MAIL: info@mart --- Page 3 --- Y 2020 PROCEEDINGS - DAY 1 [Page 2] 1 HOUSEKEEPING 2 should be switched to silent. Anyone may take notes of the 3 hearing as it continues. Journalists, but only journalists, 4 may report live by Twitter or other similar live text 5 platforms. [3 Itun to the features of this trial which are less 7 usual. COVID-19 restrictions mean that social distancing must 8 be observed in court. Currently, that requires no one to be 9 less than two metres from else. That severely limits the 10 numbers that can be in this courtroom, court 13, even taking 11 into account the opening of the public gallery in this court, 12 which has occurred. These limits mean that not even all the 13 lawyers or representatives of the parties can be accommodated 14 in this particular courtroom. For that reason, the 15 Court Service has made a second courtroom available for the 16 parties and their lawyers who cannot be accommodated in this 17 room. 18 For the most par, this trial is being conducted in 19 public. That means that, in principle, the press and public 20 are free to attend. However, even in normal times, the space 21 in courtrooms sets a practical limit on the numbers who can be 22 accommodated. The COVID-19 restrictions have added a further 23 practical dimension to these practical problems so the 24 Court Service has made three further spill-over courtrooms 25 available for the press and public. That makes four [Page 3] --- Page 4 --- 1 HOUSEKEEPING 2 spill-over courtrooms and, including this one, five in total 3 Tam grateful to the Court Service for the efforts that they 4 have made in this regard. 5 ‘The spill-over courtrooms will be linked to this one, so 6 that those in the other courtrooms will be able to see and 7 hear everything that takes place in this room, what I shall 8 call the principal courtroom. Again, 1 am grateful to the 9 Court Service for the efforts that they have made to put these 10 arrangements in place. All five rooms will be treated as part 11 of the court. There will be one or more ushers in each room. 12 ‘The restrictions which I have mentioned will apply just as 13 much to those who are in the spill-over courtrooms. I have 14 said that most of the trial will take place in public. Atan 15 earlier hearing, T ruled that parts will be in private. When 16 those parts oceur, the press and public will be excluded, and 17 only the parties and their lawyers may remain. 18 Some of the evidence will be given in the usual way by 19 witnesses coming into the witness box in this court 13. 20 However, I have previously agreed that other witnesses may 21 give evidence via video link. These are witnesses who live in 22 the USA, the Bahamas, and in Australia. The systems which 23 have been set up mean that in each of the spill-over 24 courtrooms, their evidence can be seen and heard. 25 ‘The trial is expected to last three weeks. After today, [1] (Pages 0 to 3) ( COURT, CHANCERY LANE LONDON, WC2A 1HP enwalshcherer.com FAX: (020) 7831 6864 --- Page 5 --- DEPP v NGN & WOOTTON 07 JUL [Page 4] 1 HOUSEKEEPING 2 we will start each day's hearing at 10 a.m. We will take an 3 hour for lunch at about 1 p.m. We will finish at about 4.30 a p.m. It may be necessary to have breaks in the middle of the 5 morning and the afternoon, particularly if a witness has been [3 giving evidence for a long time, but I will keep these under 7 review. Even so, the timetable is likely to be tight 8 To save time, I have directed that the parties must set 9 out their opening statements in writing instead of giving them 10 orally. Copies of those statements will be available at the 11 time when that party would normally deliver them orally. 12 Likewise, the skeleton arguments in which each party sets out 13 the outline of their case can be obtained from that party's 14 solicitors, Schillings in the case of the claimant, Simons 15 Muirhead & Burton in the case of the defendants. Neither the 16 openings nor the skeleton arguments will refer to those parts 17 of the trial that wil take place in private. 18 Now, Mr. Sherborne. 19 MR. SHERBORNE: May it please your Lordship, I appear in this 20 trial with Ms. Laws and Ms. Wilson, who sits in the jury box, 21 on behalf of the claimant, Johnny Depp. My leamed friends 22 Ms. Wass, who sits to my right, Mr. Wolanski who sits behind 23 Ms. Wilson in the jury box, and Ms. Hamer, who sits behind me 24 to my right, appear for the defendants, News Group Newspapers 25 Limited, the publishers of The Sun newspaper, and its [Page 5] --- Page 6 --- 1 HOUSEKEEPING 2 exceutive editor, Mr. Wootton, 3 Can I begin with `;
-
-  const sampleOutput = `${JSON.stringify([
-    {
-      character_id: "justice_nicol",
-      role: "judge",
-      posture: "seated",
-      emotion: "neutral",
-      text: "Before the trial begins, I want to say a few words by way of introduction.",
-      eye_target: "audience",
-      pause_before: 0.5,
-    },
-    {
-      character_id: "justice_nicol",
-      role: "judge",
-      posture: "seated",
-      emotion: "neutral",
-      text: "This is the trial of the libel action which Johnny Depp, the claimant, has brought against News Group Newspapers Limited, the publishers of The Sun, and Daniel Wootton.",
-      eye_target: "audience",
-      pause_before: 0.5,
-    },
-    {
-      character_id: "justice_nicol",
-      role: "judge",
-      posture: "seated",
-      emotion: "neutral",
-      text: "There are some features which the trial will have that are the same as any other trial. There are others which are necessarily different.",
-      eye_target: "audience",
-      pause_before: 0.5,
-    },
-    {
-      character_id: "justice_nicol",
-      role: "judge",
-      posture: "seated",
-      emotion: "neutral",
-      text: "The trial is by judge alone. There is no jury.",
-      eye_target: "audience",
-      pause_before: 0.5,
-    },
-    {
-      character_id: "justice_nicol",
-      role: "judge",
-      posture: "seated",
-      emotion: "neutral",
-      text: "It will be for me to make any necessary findings of fact and rule on any issues of law.",
-      eye_target: "audience",
-      pause_before: 0.5,
-    },
-    {
-      character_id: "justice_nicol",
-      role: "judge",
-      posture: "seated",
-      emotion: "firm",
-      text: "There may be no photography, screenshots, or sound recordings in court. Breaching this can lead to imprisonment.",
-      eye_target: "audience",
-      pause_before: 0.6,
-    },
-    {
-      character_id: "justice_nicol",
-      role: "judge",
-      posture: "seated",
-      emotion: "neutral",
-      text: "COVID-19 restrictions require everyone in court to maintain a distance of at least two metres.",
-      eye_target: "audience",
-      pause_before: 0.5,
-    },
-    {
-      character_id: "justice_nicol",
-      role: "judge",
-      posture: "seated",
-      emotion: "grateful",
-      text: "I am grateful to the Court Service for arranging spill-over courtrooms to accommodate the public and press.",
-      eye_target: "audience",
-      pause_before: 0.5,
-    },
-    {
-      character_id: "justice_nicol",
-      role: "judge",
-      posture: "seated",
-      emotion: "neutral",
-      text: "Some witnesses will give evidence in court, others via video link from the USA, the Bahamas, and Australia.",
-      eye_target: "audience",
-      pause_before: 0.5,
-    },
-    {
-      character_id: "justice_nicol",
-      role: "judge",
-      posture: "seated",
-      emotion: "neutral",
-      text: "The trial is expected to last three weeks. We will start each day's hearing at 10 a.m.",
-      eye_target: "audience",
-      pause_before: 0.5,
-    },
-    {
-      character_id: "justice_nicol",
-      role: "judge",
-      posture: "seated",
-      emotion: "neutral",
-      text: "To save time, opening statements will be submitted in writing.",
-      eye_target: "audience",
-      pause_before: 0.5,
-    },
-    {
-      character_id: "mr_sherborne",
-      role: "prosecutor",
-      posture: "standing",
-      emotion: "respectful",
-      text: "May it please your Lordship, I appear with Ms. Laws and Ms. Wilson on behalf of the claimant, Johnny Depp.",
-      eye_target: "justice_nicol",
-      pause_before: 0.5,
-    },
-    {
-      character_id: "mr_sherborne",
-      role: "prosecutor",
-      posture: "standing",
-      emotion: "neutral",
-      text: "My learned friends Ms. Wass, Mr. Wolanski, and Ms. Hamer appear for the defendants.",
-      eye_target: "justice_nicol",
-      pause_before: 0.5,
-    },
-  ])}`;
 
   const CONTEXT_WINDOW = 15;
   try {
     let contextPrompt = `You are cleaning and formatting courtroom transcript lines into structured JSON. Each line of dialog should include:
-- character_id (use character map),
-- role,
-- posture,
-- emotion,
-- text (just the spoken text),
-- eye_target (character_id of the person being spoken to, not the speaker. Pick from speakermap. Use "audience" for general audience or unknowns),
-- pause_before (number, seconds — cinematic timing),
-
-If something is not dialog, like a description of events or other metadata, ignore it.
-
-USE COMMON SENSE TO ASSIGN THE SPEAKER. For example, people don't tell themselves Good morning. They say it to someone else. Use the context of the dialog to infer who is speaking and who is being spoken to.
-
-Output an array of JSON objects — one per line. No explanations.
-
-`;
+  - character_id (use character map),
+  - role,
+  - posture,
+  - emotion,
+  - text (just the spoken text),
+  - eye_target (character_id of the person being spoken to, not the speaker. Pick from speakermap. Use "audience" for general audience or unknowns),
+  - pause_before (number, seconds — cinematic timing),
+  
+  If something is not dialog, like a description of events or other metadata, ignore it.
+  
+  USE COMMON SENSE TO ASSIGN THE SPEAKER. For example, people don't tell themselves Good morning. They say it to someone else. Use the context of the dialog to infer who is speaking and who is being spoken to.
+  
+  Output an array of JSON objects — one per line. No explanations.`;
 
     if (previousLines.length) {
       const priorContext = previousLines
@@ -1024,7 +1251,7 @@ Output an array of JSON objects — one per line. No explanations.
 
     contextPrompt += `\n\nSpeaker map:\n${JSON.stringify(
       Array.from(speakerMap.entries()).map(([id, val]) => ({
-        character_id: id,
+        character_id: val.character_id,
         name: val.name,
         role: val.role,
         label: val.speaker_label,
@@ -1034,13 +1261,12 @@ Output an array of JSON objects — one per line. No explanations.
     )}`;
 
     const prompt = `
-${chunkText}
-    `;
+  ${chunkText}
+      `;
 
     console.log(`📤 Sending chunk to OpenAI:\n`, contextPrompt);
     console.log(`📤 Sending chunk to OpenAI:\n`, prompt);
-
-    const response = await openai.chat.completions.create({
+    const request = {
       model: "gpt-4o-mini",
       messages: [
         { role: "system", content: contextPrompt },
@@ -1051,8 +1277,10 @@ ${chunkText}
         { role: "assistant", content: `${sampleOutput}` },
         { role: "user", content: prompt },
       ],
-    });
-
+    };
+    console.log("📤 OpenAI request:", JSON.stringify(request, null, 2));
+    const response = await openai.chat.completions.create(request);
+    console.log(`📥 OpenAI response (raw):`, JSON.stringify(response));
     const content = response.choices[0].message.content.trim();
     const jsonText = content
       .replace(/^```(?:json)?\s*/i, "")
@@ -1061,7 +1289,7 @@ ${chunkText}
     console.log("📥 OpenAI response (parsed):", JSON.stringify(parsedLines));
     return parsedLines; // Return structured lines, not plain text
   } catch (error) {
-    console.error("❌ GPT error in cleanText:", error.message || error);
+    console.error("❌ GPT error in processChunk:", error.message || error);
     throw new Error("Failed to clean transcript chunk");
   }
 }
@@ -1357,16 +1585,32 @@ app.post("/convert", upload.single("video"), (req, res) => {
     .outputOptions(["-movflags +faststart", "-pix_fmt yuv420p", "-r 30"])
     // .on("start", (cmd) => console.log("🎬 FFmpeg started:", cmd))
     // .on("stderr", (line) => console.log("🧪 FFmpeg stderr:", line))
-    .on("end", () => {
+    .on("end", async () => {
       console.log(`✅ Conversion finished: ${outputPath}`);
       sendSlackMessage(
         `FFmpeg success: ${outputPath}`,
         "success",
         "courtroom-scene-logs"
       );
+
+      // ✅ Upload to GCS under /video/
+      const gcsVideoPath = `video/${folderName}/${outputFileName}`;
+      const videoBuffer = fs.readFileSync(outputPath);
+      const videoUrl = await uploadToGCS(
+        videoBuffer,
+        gcsVideoPath,
+        "video/mp4"
+      );
+
+      console.log(`☁️ Video uploaded to GCS: ${videoUrl}`);
+
+      // Optional: delete local file
       fs.unlinkSync(inputPath);
-      res.json({ message: "Video segment converted and saved" });
+      fs.unlinkSync(outputPath);
+
+      res.json({ message: "Video segment converted and uploaded", videoUrl });
     })
+
     .on("error", (err) => {
       console.error("❌ FFmpeg error:", err.message || err);
       sendSlackMessage(
@@ -1678,23 +1922,6 @@ ${fullChunkText}
 
   const flatLines = highlights.flatMap((h) => h.lineObjs);
 
-  // 6. Create new scene
-  const newSceneId = crypto.randomUUID();
-  const newSceneMetadata = {
-    ...originalMetadata,
-    title: `Highlights from ${originalMetadata.title || sceneId}`,
-    summary: `This is a cinematic highlight reel extracted from scene ${sceneId}.`,
-    source_scene: sceneId,
-    extracted_at: new Date().toISOString(),
-    runtime_seconds: runningTime.toFixed(2),
-  };
-
-  await saveToSupabase("gs3_scenes", {
-    scene_id: newSceneId,
-    scene_name: `Highlights from ${sceneId}`,
-    metadata: newSceneMetadata,
-  });
-
   // 7. Save selected lines
   for (let i = 0; i < flatLines.length; i++) {
     await saveToSupabase(
@@ -1753,11 +1980,175 @@ function sendToClients(data) {
   clients.forEach((res) => res.write(payload));
 }
 
+// Cancel job by job_id
+app.post("/cancel-job", async (req, res) => {
+  const { job_id } = req.body;
+  if (!job_id) return res.status(400).json({ error: "Missing job_id" });
+
+  try {
+    await cancelJob(job_id);
+    res.json({ message: `Job ${job_id} cancelled.` });
+  } catch (err) {
+    console.error("❌ Cancel job failed:", err.message);
+    res.status(500).json({ error: "Failed to cancel job." });
+  }
+});
+
+app.delete("/videos/:sceneId", async (req, res) => {
+  const { sceneId } = req.params;
+  const { type } = req.query; // optional ?type=raw
+
+  if (!sceneId) return res.status(400).json({ error: "Missing sceneId" });
+
+  try {
+    // Fetch matching videos
+    const { data: videos, error: fetchErr } = await supabase
+      .from("gs3_videos")
+      .select("id, gcs_path")
+      .eq("scene_id", sceneId)
+      .maybeSingle();
+
+    if (fetchErr) {
+      console.error("❌ Failed to fetch videos:", fetchErr.message);
+      return res.status(500).json({ error: "Failed to fetch videos" });
+    }
+
+    // Filter by type if provided
+    const filteredVideos = type
+      ? videos.filter((v) => v.video_type === type)
+      : videos;
+
+    if (!filteredVideos.length) {
+      return res.status(404).json({ message: "No matching videos found." });
+    }
+
+    // Delete from GCS
+    const deletePromises = filteredVideos.map((v) =>
+      storage.bucket(process.env.GCS_BUCKET_NAME).file(v.gcs_path).delete()
+    );
+    await Promise.allSettled(deletePromises);
+
+    // Delete from Supabase
+    const { error: deleteErr } = await supabase
+      .from("gs3_videos")
+      .delete()
+      .in(
+        "id",
+        filteredVideos.map((v) => v.id)
+      );
+
+    if (deleteErr) {
+      console.error("❌ Failed to delete Supabase records:", deleteErr.message);
+      return res
+        .status(500)
+        .json({ error: "GCS deleted, but Supabase cleanup failed." });
+    }
+
+    console.log(
+      `🧹 Deleted ${filteredVideos.length} videos from scene ${sceneId}`
+    );
+    res.json({ message: "Videos deleted", count: filteredVideos.length });
+  } catch (err) {
+    console.error("❌ Cleanup error:", err.message);
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+app.post("/stitch-videos/:sceneId", async (req, res) => {
+  const { sceneId } = req.params;
+  const project = "missions-server";
+  const zone = "us-central1-a";
+  const templateName = "video-stitch-template";
+  const instanceName = `stitch-job-${sceneId}-${Date.now()}`;
+
+  try {
+    const auth = new GoogleAuth({
+      scopes: ["https://www.googleapis.com/auth/cloud-platform"],
+    });
+
+    const authClient = await auth.getClient();
+    const accessToken = await authClient.getAccessToken();
+
+    const templateUrl = `https://www.googleapis.com/compute/v1/projects/${project}/regions/us-central1/instanceTemplates/${templateName}`;
+    const url = `https://compute.googleapis.com/compute/v1/projects/${project}/zones/${zone}/instances?sourceInstanceTemplate=${templateUrl}`;
+
+    const payload = {
+      name: instanceName,
+      metadata: {
+        items: [{ key: "scene-id", value: sceneId }],
+      },
+    };
+
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken.token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text();
+      throw new Error(`GCP returned ${response.status}: ${errorBody}`);
+    }
+
+    const data = await response.json();
+
+    console.log(`✅ VM created: ${instanceName}`);
+    res.json({
+      message: `✅ VM created: ${instanceName}`,
+      instance: instanceName,
+      gcpOperation: data.name,
+    });
+  } catch (err) {
+    console.error("❌ VM launch failed:", err.message);
+    res.status(500).json({
+      error: "Failed to launch stitching VM",
+      details: err.message,
+    });
+  }
+});
+
+app.get("/get-stitched-video/:sceneId", async (req, res) => {
+  const { sceneId } = req.params;
+
+  if (!sceneId) {
+    return res.status(400).json({ error: "Missing sceneId" });
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from("gs3_videos")
+      .select("*")
+      .eq("scene_id", sceneId)
+      .eq("video_type", "stitched")
+      .order("created_at", { ascending: false })
+      .limit(1);
+
+    if (error) {
+      console.error("❌ Supabase query error:", error.message);
+      return res.status(500).json({ error: "Supabase error" });
+    }
+
+    const video = data?.[0]; // data is an array
+
+    if (!video || !video.video_url) {
+      return res.status(404).json({ error: "Stitched video not found yet." });
+    }
+
+    return res.status(200).json({ video_url: video.video_url });
+  } catch (err) {
+    console.error("❌ Backend error:", err.message);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+});
+
 ["log", "info", "warn", "error"].forEach((method) => {
   const original = console[method];
   console[method] = (...args) => {
     const timestamp = new Date().toISOString();
-    const message = args.map(String).join(" ");
+    const message = util.format(...args); // ← Safe formatting
     sendToClients({ type: method, message, timestamp });
     original(`[${timestamp}]`, ...args);
   };
