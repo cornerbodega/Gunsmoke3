@@ -10,11 +10,14 @@ export default async function handler(req, res) {
   }
 
   try {
-    const response = await fetch("http://localhost:3001/cancel-job", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ job_id }),
-    });
+    const response = await fetch(
+      `http://${process.env.NEXT_PUBLIC_SERVER_URL}/cancel-job`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ job_id }),
+      }
+    );
 
     const data = await response.json();
 
