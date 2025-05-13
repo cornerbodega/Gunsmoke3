@@ -1,12 +1,11 @@
 // pages/api/preview-pdf.js
-import { IncomingForm } from "formidable";
 import Busboy from "busboy";
 import axios from "axios";
 import FormData from "form-data";
 
 export const config = {
   api: {
-    bodyParser: false, // required to handle streams manually
+    bodyParser: false, // Required to handle file uploads via streams
   },
 };
 
@@ -14,26 +13,26 @@ const SERVER_URL = `${process.env.NEXT_PUBLIC_SERVER_URL}/preview-pdf`;
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
-    return res.status(405).json({ error: "Only POST allowed" });
+    return res.status(405).json({ error: "Only POST method allowed" });
   }
 
   const busboy = Busboy({ headers: req.headers });
   const formData = new FormData();
 
-  let userId = null;
-
   let fileProcessed = false;
 
   busboy.on("file", (fieldname, file, filename, encoding, mimetype) => {
     if (fieldname === "pdf") {
-      formData.append("pdf", file, { filename, contentType: mimetype });
+      formData.append("pdf", file, {
+        filename: filename || "upload.pdf",
+        contentType: mimetype || "application/pdf",
+      });
       fileProcessed = true;
     }
   });
 
   busboy.on("field", (fieldname, val) => {
     if (fieldname === "user_id") {
-      userId = val;
       formData.append("user_id", val);
     }
   });
@@ -57,7 +56,7 @@ export default async function handler(req, res) {
 
       return res.status(200).json(response.data);
     } catch (err) {
-      console.error("Upload error:", err.response?.data || err.message);
+      console.error("Forwarding error:", err.response?.data || err.message);
       return res
         .status(500)
         .json({ error: "Failed to upload PDF for preview" });
