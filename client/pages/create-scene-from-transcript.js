@@ -89,6 +89,7 @@ export default function CreateScene() {
         }
       } catch {
         setUploadProgress(0);
+        console.error("Failed to parse preview response:", xhr.responseText);
         setStatusMessage("❌ Failed to parse preview response.");
       }
     };
